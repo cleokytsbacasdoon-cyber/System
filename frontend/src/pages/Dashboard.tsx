@@ -32,15 +32,13 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [refreshInterval, setRefreshInterval] = useState(30);
-
-  // CALENDAR STATE
+  const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
-  const months = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
 
-  // UPDATED: Generate years from 2016 to 2030
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
   const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);
 
   useEffect(() => {
@@ -77,45 +75,49 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // --- UPDATED PHILIPPINE HOLIDAY LOGIC ---
+  const apiParameters = [
+    'Philippine Holidays',
+    'Average High Temperature',
+    'Average Low Temperature',
+    'Average Precipitation',
+    'Inflation Rate',
+    'Top 10 Market Holidays',
+  ];
+
   const getPHHoliday = (day: number, month: number, year: number) => {
-    // Fixed Date Holidays
     const holidayMap: { [key: string]: string } = {
-      "0-1": "New Year's Day",
-      "0-2": "Special Non-Working Day",
-      "1-25": "EDSA Revolution Anniversary",
-      "3-9": "Araw ng Kagitingan",
-      "4-1": "Labor Day",
-      "5-12": "Independence Day",
-      "7-21": "Ninoy Aquino Day",
-      "7-25": "National Heroes Day", // Note: Usually last Monday, simplified here
-      "10-1": "All Saints' Day",
-      "10-2": "All Souls' Day",
-      "10-30": "Bonifacio Day",
-      "11-8": "Immaculate Conception",
-      "11-24": "Christmas Eve",
-      "11-25": "Christmas Day",
-      "11-30": "Rizal Day",
-      "11-31": "New Year's Eve"
+      '0-1': "New Year's Day",
+      '0-2': 'Special Non-Working Day',
+      '1-25': 'EDSA Revolution Anniversary',
+      '3-9': 'Araw ng Kagitingan',
+      '4-1': 'Labor Day',
+      '5-12': 'Independence Day',
+      '7-21': 'Ninoy Aquino Day',
+      '7-25': 'National Heroes Day',
+      '10-1': "All Saints' Day",
+      '10-2': "All Souls' Day",
+      '10-30': 'Bonifacio Day',
+      '11-8': 'Immaculate Conception',
+      '11-24': 'Christmas Eve',
+      '11-25': 'Christmas Day',
+      '11-30': 'Rizal Day',
+      '11-31': "New Year's Eve",
     };
 
-    // Moveable Holidays (Holy Week Logic for 2024-2030)
     const moveable: { [key: string]: string } = {};
-    
-    // Logic for specific years (Common monitoring window)
     if (year === 2024) {
-        if (month === 2 && day === 28) moveable[`${month}-${day}`] = "Maundy Thursday";
-        if (month === 2 && day === 29) moveable[`${month}-${day}`] = "Good Friday";
+      if (month === 2 && day === 28) moveable[`${month}-${day}`] = 'Maundy Thursday';
+      if (month === 2 && day === 29) moveable[`${month}-${day}`] = 'Good Friday';
     } else if (year === 2025) {
-        if (month === 3 && day === 17) moveable[`${month}-${day}`] = "Maundy Thursday";
-        if (month === 3 && day === 18) moveable[`${month}-${day}`] = "Good Friday";
+      if (month === 3 && day === 17) moveable[`${month}-${day}`] = 'Maundy Thursday';
+      if (month === 3 && day === 18) moveable[`${month}-${day}`] = 'Good Friday';
     } else if (year === 2026) {
-        if (month === 3 && day === 2) moveable[`${month}-${day}`] = "Maundy Thursday";
-        if (month === 3 && day === 3) moveable[`${month}-${day}`] = "Good Friday";
-        if (month === 3 && day === 4) moveable[`${month}-${day}`] = "Black Saturday";
+      if (month === 3 && day === 2) moveable[`${month}-${day}`] = 'Maundy Thursday';
+      if (month === 3 && day === 3) moveable[`${month}-${day}`] = 'Good Friday';
+      if (month === 3 && day === 4) moveable[`${month}-${day}`] = 'Black Saturday';
     } else if (year === 2027) {
-        if (month === 2 && day === 25) moveable[`${month}-${day}`] = "Maundy Thursday";
-        if (month === 2 && day === 26) moveable[`${month}-${day}`] = "Good Friday";
+      if (month === 2 && day === 25) moveable[`${month}-${day}`] = 'Maundy Thursday';
+      if (month === 2 && day === 26) moveable[`${month}-${day}`] = 'Good Friday';
     }
 
     return moveable[`${month}-${day}`] || holidayMap[`${month}-${day}`] || null;
@@ -144,11 +146,37 @@ export const Dashboard: React.FC = () => {
   const handleCheckEndpoint = async (endpointId: string) => {
     try {
       const updatedEndpoint = await checkEndpointStatus(endpointId);
-      setEndpoints(endpoints.map(e => e.id === endpointId ? updatedEndpoint : e));
+      setEndpoints(prev => prev.map(e => e.id === endpointId ? updatedEndpoint : e));
       addToast('Endpoint checked', 'success');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to check endpoint', 'error');
     }
+  };
+
+  const handleApiParameterAction = async (parameter: string, endpointId?: string) => {
+    setSelectedApiParameter(parameter);
+    if (!endpointId) {
+      addToast(`No endpoint mapped for ${parameter}`, 'error');
+      return;
+    }
+
+    await handleCheckEndpoint(endpointId);
+    addToast(`${parameter} checked via endpoint monitor`, 'success');
+  };
+
+  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
+
+  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newDate = new Date(viewDate);
+    newDate.setMonth(parseInt(e.target.value, 10));
+    setViewDate(newDate);
+  };
+
+  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newDate = new Date(viewDate);
+    newDate.setFullYear(parseInt(e.target.value, 10));
+    setViewDate(newDate);
   };
 
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
@@ -160,24 +188,7 @@ export const Dashboard: React.FC = () => {
     { id: 'alerts', label: '⚠️ Alerts' },
     { id: 'retraining', label: '🔄 Retraining' },
     { id: 'api', label: '🔗 API' },
-    { id: 'ph-calendar', label: ' PH Calendar' },
   ];
-
-  // CALENDAR LOGIC HELPERS
-  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-  const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
-
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newDate = new Date(viewDate);
-    newDate.setMonth(parseInt(e.target.value));
-    setViewDate(newDate);
-  };
-
-  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newDate = new Date(viewDate);
-    newDate.setFullYear(parseInt(e.target.value));
-    setViewDate(newDate);
-  };
 
   if (loading && metrics.length === 0) {
     return (
@@ -273,66 +284,107 @@ export const Dashboard: React.FC = () => {
         {/* API Tab */}
         {activeTab === 'api' && (
           <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            {endpoints.map(endpoint => <APIEndpointCard key={endpoint.id} endpoint={endpoint} onCheck={handleCheckEndpoint} />)}
-          </div>
-        )}
-
-        {/* PH CALENDAR TAB */}
-        {activeTab === 'ph-calendar' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-100 dark:border-slate-700">
-              <h2 className="text-2xl font-bold">Philippine Holiday Tracker</h2>
-              <div className="flex gap-2">
-                <select 
-                  value={viewDate.getMonth()} 
-                  onChange={handleMonthChange} 
-                  className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                >
-                  {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
-                </select>
-                <select 
-                  value={viewDate.getFullYear()} 
-                  onChange={handleYearChange} 
-                  className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                >
-                  {years.map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-7 gap-2">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
-              ))}
-              
-              {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
-                <div key={`empty-${i}`} className="min-h-[100px]"></div>
-              ))}
-
-              {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
-                const day = i + 1;
-                const holiday = getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
-                const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
-
-                return (
-                  <div 
-                    key={day} 
-                    className={`min-h-[100px] p-2 rounded border transition-colors ${
-                      isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-100'
-                    } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
-                  >
-                    <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
-                    {holiday && (
-                      <div className="mt-2">
-                        <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
-                          {holiday}
-                        </span>
+            <div>
+              <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
+              <p className={`mb-4 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                Click a parameter to check its mapped monitored endpoint.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                {apiParameters.map((parameter, index) => {
+                  const mappedEndpoint = endpoints.length > 0 ? endpoints[index % endpoints.length] : undefined;
+                  return (
+                    <div
+                      key={parameter}
+                      className={`rounded-lg border px-4 py-3 ${
+                        isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-gray-50 border-gray-200 text-gray-700'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{parameter}</p>
+                          <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Endpoint: {mappedEndpoint ? mappedEndpoint.name : 'Not available'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleApiParameterAction(parameter, mappedEndpoint?.id)}
+                          className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
+                        >
+                          Check API
+                        </button>
                       </div>
-                    )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedApiParameter === 'Philippine Holidays' && (
+                <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
+                    <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
+                    <div className="flex gap-2">
+                      <select
+                        value={viewDate.getMonth()}
+                        onChange={handleMonthChange}
+                        className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                      >
+                        {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
+                      </select>
+                      <select
+                        value={viewDate.getFullYear()}
+                        onChange={handleYearChange}
+                        className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                      >
+                        {years.map(year => <option key={year} value={year}>{year}</option>)}
+                      </select>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+
+                  <div className="grid grid-cols-7 gap-2 mt-4">
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                      <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
+                    ))}
+
+                    {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
+                      <div key={`empty-${i}`} className="min-h-[90px]"></div>
+                    ))}
+
+                    {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
+                      const day = i + 1;
+                      const holiday = getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
+                      const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
+
+                      return (
+                        <div
+                          key={day}
+                          className={`min-h-[90px] p-2 rounded border transition-colors ${
+                            isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
+                          } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
+                        >
+                          <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
+                          {holiday && (
+                            <div className="mt-2">
+                              <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
+                                {holiday}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {selectedApiParameter && selectedApiParameter !== 'Philippine Holidays' && (
+                <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  Active parameter: <span className="font-semibold">{selectedApiParameter}</span>
+                </p>
+              )}
+              </div>
+
+            <h3 className="text-xl font-semibold">Monitored Endpoints</h3>
+            {endpoints.map(endpoint => <APIEndpointCard key={endpoint.id} endpoint={endpoint} onCheck={handleCheckEndpoint} />)}
           </div>
         )}
 

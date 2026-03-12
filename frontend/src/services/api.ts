@@ -2,10 +2,10 @@ import axios from 'axios';
 import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights } from '../types';
 import { mockApi } from './mockApi';
 
-// Use mock API in development (no backend needed)
-const USE_MOCK_API = true; // Set to false when backend is ready
+// Defaults keep the current mock-first behavior unless VITE_USE_MOCK_API=false.
+const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API !== 'false';
 
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
