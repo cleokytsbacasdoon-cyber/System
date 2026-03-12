@@ -329,26 +329,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           </div>
 
           <div className="px-4 md:px-8 xl:px-10 py-8">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
-              <div>
-                <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <button
-                  onClick={() => setActiveTab('export')}
-                  className={`px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm font-medium ${
-                    activeTab === 'export' ? 'bg-purple-600 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  📥 EXPORT
-                </button>
-                <button
-                  onClick={() => loadData()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm font-medium"
-                >
-                  🔄 REFRESH
-                </button>
-              </div>
+            <div className="mb-8">
+              <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
             </div>
 
             {/* Overview Tab */}
