@@ -26,7 +26,7 @@ export const RetrainingJobCard: React.FC<RetrainingJobCardProps> = ({ job, onRet
   };
 
   return (
-    <div className={`rounded-lg shadow-md p-6 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+    <div className={`rounded-lg shadow-md p-6 h-full flex flex-col ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
       <div className="flex justify-between items-start mb-4">
         <h3 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{job.modelId}</h3>
         <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(job.status)}`}>
@@ -55,7 +55,7 @@ export const RetrainingJobCard: React.FC<RetrainingJobCardProps> = ({ job, onRet
 
       <button
         onClick={() => onRetrain(job.modelId)}
-        className="mt-4 w-full px-4 py-2 bg-primary text-white rounded hover:bg-blue-600"
+        className="mt-auto pt-4 w-full px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 flex items-center justify-center text-center"
       >
         Start New Retraining
       </button>
