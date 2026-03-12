@@ -4,7 +4,6 @@ import { DarkModeProvider } from './contexts/DarkModeContext'
 import { useDarkMode } from './contexts/DarkModeContext'
 import { Dashboard } from './pages/Dashboard'
 import { SettingsPage } from './pages/Settings'
-import { Header } from './components/Header'
 import { ToastContainer } from './components/ToastContainer'
 
 function AppContent() {
@@ -13,10 +12,8 @@ function AppContent() {
 
   return (
     <div className={`w-full min-h-screen transition-colors duration-200 ${isDarkMode ? 'dark bg-slate-950' : 'bg-gray-50'}`}>
-      <Header onSettingsClick={() => setCurrentPage('settings')} />
-      
       {currentPage === 'dashboard' && (
-        <Dashboard />
+        <Dashboard onSettingsClick={() => setCurrentPage('settings')} />
       )}
       
       {currentPage === 'settings' && (

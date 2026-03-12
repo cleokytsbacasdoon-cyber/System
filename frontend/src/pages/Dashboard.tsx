@@ -20,9 +20,13 @@ import {
 import { useToast } from '../contexts/ToastContext';
 import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint } from '../types';
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+  onSettingsClick: () => void;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const { addToast } = useToast();
-  const { isDarkMode } = useDarkMode();
+  const { isDarkMode, toggleDarkMode } = useDarkMode();
   const [metrics, setMetrics] = useState<ModelMetrics[]>([]);
   const [alerts, setAlerts] = useState<DriftAlert[]>([]);
   const [jobs, setJobs] = useState<RetrainingJob[]>([]);
@@ -218,8 +222,7 @@ export const Dashboard: React.FC = () => {
       <div className="w-full min-h-screen flex">
         <aside className={`hidden md:flex md:w-72 lg:w-80 shrink-0 flex-col border-r p-6 sticky top-0 h-screen ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold">ML Monitoring</h1>
-            <p className={`${isDarkMode ? 'text-gray-400' : 'text-gray-600'} text-sm mt-1`}>Static navigation workspace</p>
+            <h1 className="text-2xl font-bold">Tourist Prediction Monitoring System</h1>
           </div>
 
           <div className={`rounded-xl p-4 border mb-6 ${isDarkMode ? 'bg-slate-950 border-slate-700 text-gray-200' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
@@ -247,7 +250,23 @@ export const Dashboard: React.FC = () => {
             ))}
           </nav>
 
-          <div className="mt-auto pt-6">
+          <div className="mt-auto pt-6 space-y-3">
+            <button
+              onClick={toggleDarkMode}
+              className={`w-full px-4 py-3 rounded-lg transition font-medium border ${
+                isDarkMode
+                  ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+            </button>
+            <button
+              onClick={onSettingsClick}
+              className="w-full px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
+            >
+              ⚙️ Settings
+            </button>
             <button
               onClick={() => loadData()}
               className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
@@ -260,7 +279,7 @@ export const Dashboard: React.FC = () => {
         <main className="flex-1 min-w-0">
           <div className={`md:hidden px-4 py-4 border-b sticky top-0 z-10 ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
             <div className="flex items-center justify-between mb-3">
-              <h1 className="text-xl font-bold">ML Monitoring</h1>
+              <h1 className="text-xl font-bold">Tourist Prediction Monitoring System</h1>
               <p className="text-xs opacity-80">{currentDateTime.toLocaleTimeString()}</p>
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1">
@@ -279,6 +298,22 @@ export const Dashboard: React.FC = () => {
                   {item.icon} {item.label}
                 </button>
               ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <button
+                onClick={toggleDarkMode}
+                className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                  isDarkMode ? 'bg-slate-800 text-gray-100' : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                {isDarkMode ? '☀️ Light' : '🌙 Dark'}
+              </button>
+              <button
+                onClick={onSettingsClick}
+                className="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white"
+              >
+                ⚙️ Settings
+              </button>
             </div>
           </div>
 
