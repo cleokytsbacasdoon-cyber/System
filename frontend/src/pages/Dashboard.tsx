@@ -8,7 +8,6 @@ import { PerformanceChart } from '../components/PerformanceChart';
 import { DriftStats } from '../components/DriftStats';
 import { RetrainingStats } from '../components/RetrainingStats';
 import { DataExport } from '../components/DataExport';
-import { Tabs } from '../components/Tabs';
 import { 
   getModelMetrics, 
   getDriftAlerts, 
@@ -33,6 +32,7 @@ export const Dashboard: React.FC = () => {
   const [refreshInterval, setRefreshInterval] = useState(30);
   const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
+  const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -53,6 +53,14 @@ export const Dashboard: React.FC = () => {
     const interval = setInterval(loadData, refreshInterval * 1000);
     return () => clearInterval(interval);
   }, [refreshInterval]);
+
+  useEffect(() => {
+    const clockTimer = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(clockTimer);
+  }, []);
 
   const loadData = async () => {
     try {
@@ -184,12 +192,15 @@ export const Dashboard: React.FC = () => {
   const unresolvedAlerts = useMemo(() => alerts.filter(a => !a.resolved), [alerts]);
 
   const tabs = [
-    { id: 'overview', label: '📊 Overview' },
-    { id: 'metrics', label: '📈 Metrics' },
-    { id: 'alerts', label: '⚠️ Alerts' },
-    { id: 'retraining', label: '🔄 Retraining' },
-    { id: 'api', label: '🔗 API' },
+    { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'metrics', label: 'Metrics', icon: '📈' },
+    { id: 'alerts', label: 'Alerts', icon: '⚠️' },
+    { id: 'retraining', label: 'Retraining', icon: '🔄' },
+    { id: 'api', label: 'API', icon: '🔗' },
   ];
+
+  const navigationItems = [...tabs, { id: 'export', label: 'Export', icon: '📥' }];
+  const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
   if (loading && metrics.length === 0) {
     return (
@@ -204,196 +215,263 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className={`min-h-screen ${isDarkMode ? 'dark bg-slate-950' : 'bg-gray-50'}`}>
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* HEADER SECTION */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className={`text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>ML Monitoring Dashboard</h1>
-            <p className={`mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Real-time monitoring and analytics</p>
+      <div className="w-full min-h-screen flex">
+        <aside className={`hidden md:flex md:w-72 lg:w-80 shrink-0 flex-col border-r p-6 sticky top-0 h-screen ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold">ML Monitoring</h1>
+            <p className={`${isDarkMode ? 'text-gray-400' : 'text-gray-600'} text-sm mt-1`}>Static navigation workspace</p>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className={`rounded-xl p-4 border mb-6 ${isDarkMode ? 'bg-slate-950 border-slate-700 text-gray-200' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
+            <p className="text-xs uppercase tracking-wide opacity-70">Current Date and Time</p>
+            <p className="text-sm font-semibold mt-1">{currentDateTime.toLocaleDateString()}</p>
+            <p className="text-sm font-semibold">{currentDateTime.toLocaleTimeString()}</p>
+          </div>
+
+          <nav className="space-y-2">
+            {navigationItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition ${
+                  activeTab === item.id
+                    ? 'bg-blue-600 text-white shadow'
+                    : isDarkMode
+                    ? 'hover:bg-slate-800 text-gray-200'
+                    : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span className="font-medium">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-auto pt-6">
             <button
-              onClick={() => setActiveTab('export')}
-              className={`px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm font-medium ${
-                activeTab === 'export' ? 'bg-purple-600 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-              }`}
+              onClick={() => loadData()}
+              className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
             >
-              📥 EXPORT
-            </button>
-            <button onClick={() => loadData()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm font-medium">
-              🔄 REFRESH
+              Refresh Dashboard
             </button>
           </div>
-        </div>
+        </aside>
 
-        <Tabs activeTab={activeTab} tabs={tabs} onTabChange={setActiveTab} />
-
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
-           <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-             <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Metrics</p>
-               <p className="text-3xl font-bold text-blue-500">{metrics.length}</p>
-             </div>
-             <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Active Alerts</p>
-               <p className="text-3xl font-bold text-orange-500">{unresolvedAlerts.length}</p>
-             </div>
-             <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Retraining Jobs</p>
-               <p className="text-3xl font-bold text-green-500">{jobs.length}</p>
-             </div>
-             <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-               <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>API Endpoints</p>
-               <p className="text-3xl font-bold text-purple-500">{endpoints.length}</p>
-             </div>
-           </div>
-           {latestMetric && <MetricsCard metric={latestMetric} />}
-           <DriftStats alerts={alerts} />
-           <RetrainingStats jobs={jobs} />
-         </div>
-        )}
-
-        {/* Metrics Tab */}
-        {activeTab === 'metrics' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            {latestMetric && <PerformanceChart latest={latestMetric} />}
-            {metrics.length > 0 && <MetricsChart metrics={metrics} />}
-          </div>
-        )}
-
-        {/* Alerts Tab */}
-        {activeTab === 'alerts' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            <div className="space-y-4">
-              {alerts.length > 0 ? alerts.map(alert => <DriftAlertCard key={alert.id} alert={alert} onResolve={handleResolveAlert} />) : <p>No alerts</p>}
+        <main className="flex-1 min-w-0">
+          <div className={`md:hidden px-4 py-4 border-b sticky top-0 z-10 ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <h1 className="text-xl font-bold">ML Monitoring</h1>
+              <p className="text-xs opacity-80">{currentDateTime.toLocaleTimeString()}</p>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {navigationItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`px-3 py-2 rounded-lg whitespace-nowrap text-sm ${
+                    activeTab === item.id
+                      ? 'bg-blue-600 text-white'
+                      : isDarkMode
+                      ? 'bg-slate-800 text-gray-200'
+                      : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {item.icon} {item.label}
+                </button>
+              ))}
             </div>
           </div>
-        )}
 
-        {/* Retraining Tab */}
-        {activeTab === 'retraining' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
-            </div>
-          </div>
-        )}
-
-        {/* API Tab */}
-        {activeTab === 'api' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            <div>
-              <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
-              <p className={`mb-4 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                Click a parameter to check its mapped monitored endpoint.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-                {apiParameters.map((parameter, index) => {
-                  const mappedEndpoint = endpoints.length > 0 ? endpoints[index % endpoints.length] : undefined;
-                  return (
-                    <div
-                      key={parameter}
-                      className={`rounded-lg border px-4 py-3 ${
-                        isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-gray-50 border-gray-200 text-gray-700'
-                      }`}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{parameter}</p>
-                          <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Endpoint: {mappedEndpoint ? mappedEndpoint.name : 'Not available'}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleApiParameterAction(parameter, mappedEndpoint?.id)}
-                          className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
-                        >
-                          Check API
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+          <div className="px-4 md:px-8 xl:px-10 py-8">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
+              <div>
+                <p className={`text-xs uppercase tracking-wide ${isDarkMode ? 'text-blue-300' : 'text-blue-600'}`}>Dashboard Section</p>
+                <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
+                <p className={`mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Real-time monitoring and analytics</p>
               </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => setActiveTab('export')}
+                  className={`px-4 py-2 rounded-lg transition flex items-center gap-2 shadow-sm font-medium ${
+                    activeTab === 'export' ? 'bg-purple-600 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  📥 EXPORT
+                </button>
+                <button
+                  onClick={() => loadData()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm font-medium"
+                >
+                  🔄 REFRESH
+                </button>
+              </div>
+            </div>
 
-              {selectedApiParameter === 'Philippine Holidays' && (
-                <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                  <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
-                    <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
-                    <div className="flex gap-2">
-                      <select
-                        value={viewDate.getMonth()}
-                        onChange={handleMonthChange}
-                        className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                      >
-                        {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
-                      </select>
-                      <select
-                        value={viewDate.getFullYear()}
-                        onChange={handleYearChange}
-                        className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                      >
-                        {years.map(year => <option key={year} value={year}>{year}</option>)}
-                      </select>
-                    </div>
+            {/* Overview Tab */}
+            {activeTab === 'overview' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Metrics</p>
+                    <p className="text-3xl font-bold text-blue-500">{metrics.length}</p>
                   </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Active Alerts</p>
+                    <p className="text-3xl font-bold text-orange-500">{unresolvedAlerts.length}</p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Retraining Jobs</p>
+                    <p className="text-3xl font-bold text-green-500">{jobs.length}</p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>API Endpoints</p>
+                    <p className="text-3xl font-bold text-purple-500">{endpoints.length}</p>
+                  </div>
+                </div>
+                {latestMetric && <MetricsCard metric={latestMetric} />}
+                <DriftStats alerts={alerts} />
+                <RetrainingStats jobs={jobs} />
+              </div>
+            )}
 
-                  <div className="grid grid-cols-7 gap-2 mt-4">
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                      <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
-                    ))}
+            {/* Metrics Tab */}
+            {activeTab === 'metrics' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                {latestMetric && <PerformanceChart latest={latestMetric} />}
+                {metrics.length > 0 && <MetricsChart metrics={metrics} />}
+              </div>
+            )}
 
-                    {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
-                      <div key={`empty-${i}`} className="min-h-[90px]"></div>
-                    ))}
+            {/* Alerts Tab */}
+            {activeTab === 'alerts' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className="space-y-4">
+                  {alerts.length > 0 ? alerts.map(alert => <DriftAlertCard key={alert.id} alert={alert} onResolve={handleResolveAlert} />) : <p>No alerts</p>}
+                </div>
+              </div>
+            )}
 
-                    {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
-                      const day = i + 1;
-                      const holiday = getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
-                      const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
+            {/* Retraining Tab */}
+            {activeTab === 'retraining' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
+                </div>
+              </div>
+            )}
 
+            {/* API Tab */}
+            {activeTab === 'api' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div>
+                  <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
+                  <p className={`mb-4 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    Click a parameter to check its mapped monitored endpoint.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
+                    {apiParameters.map((parameter, index) => {
+                      const mappedEndpoint = endpoints.length > 0 ? endpoints[index % endpoints.length] : undefined;
                       return (
                         <div
-                          key={day}
-                          className={`min-h-[90px] p-2 rounded border transition-colors ${
-                            isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
-                          } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
+                          key={parameter}
+                          className={`rounded-lg border px-4 py-3 ${
+                            isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-gray-50 border-gray-200 text-gray-700'
+                          }`}
                         >
-                          <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
-                          {holiday && (
-                            <div className="mt-2">
-                              <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
-                                {holiday}
-                              </span>
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div>
+                              <p className="font-semibold">{parameter}</p>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                Endpoint: {mappedEndpoint ? mappedEndpoint.name : 'Not available'}
+                              </p>
                             </div>
-                          )}
+                            <button
+                              onClick={() => handleApiParameterAction(parameter, mappedEndpoint?.id)}
+                              className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
+                            >
+                              Check API
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
+
+                  {selectedApiParameter === 'Philippine Holidays' && (
+                    <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
+                        <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
+                        <div className="flex gap-2">
+                          <select
+                            value={viewDate.getMonth()}
+                            onChange={handleMonthChange}
+                            className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          >
+                            {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
+                          </select>
+                          <select
+                            value={viewDate.getFullYear()}
+                            onChange={handleYearChange}
+                            className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          >
+                            {years.map(year => <option key={year} value={year}>{year}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-2 mt-4">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                          <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
+                        ))}
+
+                        {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
+                          <div key={`empty-${i}`} className="min-h-[90px]"></div>
+                        ))}
+
+                        {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
+                          const day = i + 1;
+                          const holiday = getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
+                          const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
+
+                          return (
+                            <div
+                              key={day}
+                              className={`min-h-[90px] p-2 rounded border transition-colors ${
+                                isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
+                              } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
+                            >
+                              <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
+                              {holiday && (
+                                <div className="mt-2">
+                                  <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
+                                    {holiday}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedApiParameter && selectedApiParameter !== 'Philippine Holidays' && (
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                      Active parameter: <span className="font-semibold">{selectedApiParameter}</span>
+                    </p>
+                  )}
                 </div>
-              )}
-
-              {selectedApiParameter && selectedApiParameter !== 'Philippine Holidays' && (
-                <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                  Active parameter: <span className="font-semibold">{selectedApiParameter}</span>
-                </p>
-              )}
               </div>
+            )}
 
+            {/* EXPORT CONTEXT */}
+            {activeTab === 'export' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
+              </div>
+            )}
           </div>
-        )}
-
-        {/* EXPORT CONTEXT */}
-        {activeTab === 'export' && (
-          <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-            <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
-          </div>
-        )}
-
+        </main>
       </div>
     </div>
   );
