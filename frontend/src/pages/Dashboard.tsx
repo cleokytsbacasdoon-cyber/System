@@ -225,12 +225,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             <h1 className="text-2xl font-bold">Tourist Prediction Monitoring System</h1>
           </div>
 
-          <div className={`rounded-xl p-4 border mb-6 ${isDarkMode ? 'bg-slate-950 border-slate-700 text-gray-200' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
-            <p className="text-xs uppercase tracking-wide opacity-70">Current Date and Time</p>
-            <p className="text-sm font-semibold mt-1">{currentDateTime.toLocaleDateString()}</p>
-            <p className="text-sm font-semibold">{currentDateTime.toLocaleTimeString()}</p>
-          </div>
-
           <nav className="space-y-2">
             {navigationItems.map((item) => (
               <button
@@ -250,29 +244,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             ))}
           </nav>
 
-          <div className="mt-auto pt-6 space-y-3">
-            <button
-              onClick={toggleDarkMode}
-              className={`w-full px-4 py-3 rounded-lg transition font-medium border ${
-                isDarkMode
-                  ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
-                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
-            </button>
-            <button
-              onClick={onSettingsClick}
-              className="w-full px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition font-medium"
-            >
-              ⚙️ Settings
-            </button>
-            <button
-              onClick={() => loadData()}
-              className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
-            >
-              Refresh Dashboard
-            </button>
+          <div className="mt-auto pt-6">
+            <div className="flex items-center justify-around mb-4">
+              <button
+                onClick={toggleDarkMode}
+                title={isDarkMode ? 'Light Mode' : 'Dark Mode'}
+                className={`p-3 rounded-lg transition text-xl border ${
+                  isDarkMode
+                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                {isDarkMode ? '☀️' : '🌙'}
+              </button>
+              <button
+                onClick={onSettingsClick}
+                title="Settings"
+                className={`p-3 text-xl rounded-lg transition border ${
+                  isDarkMode
+                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                ⚙️
+              </button>
+              <button
+                onClick={() => loadData()}
+                title="Refresh Dashboard"
+                className={`p-3 text-xl rounded-lg transition border ${
+                  isDarkMode
+                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                🔄
+              </button>
+            </div>
+            <div className={`w-full ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+              <p className="text-xl font-bold w-full text-center">{currentDateTime.toLocaleDateString()}</p>
+              <p className="text-xl font-bold w-full text-center">{currentDateTime.toLocaleTimeString()}</p>
+            </div>
           </div>
         </aside>
 
@@ -320,9 +331,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           <div className="px-4 md:px-8 xl:px-10 py-8">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
               <div>
-                <p className={`text-xs uppercase tracking-wide ${isDarkMode ? 'text-blue-300' : 'text-blue-600'}`}>Dashboard Section</p>
                 <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
-                <p className={`mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Real-time monitoring and analytics</p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 <button
@@ -400,9 +409,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div>
                   <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
-                  <p className={`mb-4 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    Click a parameter to check its mapped monitored endpoint.
-                  </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                     {apiParameters.map((parameter, index) => {
                       const mappedEndpoint = endpoints.length > 0 ? endpoints[index % endpoints.length] : undefined;
