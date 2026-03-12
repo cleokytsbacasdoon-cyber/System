@@ -3,7 +3,6 @@ import { useDarkMode } from '../contexts/DarkModeContext';
 import { MetricsCard } from '../components/MetricsCard';
 import { DriftAlertCard } from '../components/DriftAlertCard';
 import { RetrainingJobCard } from '../components/RetrainingJobCard';
-import { APIEndpointCard } from '../components/APIEndpointCard';
 import { MetricsChart } from '../components/MetricsChart';
 import { PerformanceChart } from '../components/PerformanceChart';
 import { DriftStats } from '../components/DriftStats';
@@ -143,11 +142,13 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleCheckEndpoint = async (endpointId: string) => {
+  const handleCheckEndpoint = async (endpointId: string, options?: { silentSuccess?: boolean }) => {
     try {
       const updatedEndpoint = await checkEndpointStatus(endpointId);
       setEndpoints(prev => prev.map(e => e.id === endpointId ? updatedEndpoint : e));
-      addToast('Endpoint checked', 'success');
+      if (!options?.silentSuccess) {
+        addToast('Endpoint checked', 'success');
+      }
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to check endpoint', 'error');
     }
@@ -160,7 +161,7 @@ export const Dashboard: React.FC = () => {
       return;
     }
 
-    await handleCheckEndpoint(endpointId);
+    await handleCheckEndpoint(endpointId, { silentSuccess: true });
     addToast(`${parameter} checked via endpoint monitor`, 'success');
   };
 
@@ -383,8 +384,6 @@ export const Dashboard: React.FC = () => {
               )}
               </div>
 
-            <h3 className="text-xl font-semibold">Monitored Endpoints</h3>
-            {endpoints.map(endpoint => <APIEndpointCard key={endpoint.id} endpoint={endpoint} onCheck={handleCheckEndpoint} />)}
           </div>
         )}
 
