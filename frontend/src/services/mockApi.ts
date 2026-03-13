@@ -1,6 +1,110 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights } from '../types';
 
+const ALERT_MODEL_ID = 'tourism-forecast-v1';
+
+const createAlert = (
+  partial: Omit<DemandAlert, 'id' | 'modelId'>,
+  existingAlerts: DemandAlert[]
+): DemandAlert => {
+  const existingMatch = existingAlerts.find(
+    (alert) => alert.title === partial.title && alert.message === partial.message
+  );
+
+  return {
+    id: existingMatch?.id || uuidv4(),
+    modelId: ALERT_MODEL_ID,
+    resolved: existingMatch?.resolved ?? partial.resolved,
+    ...partial,
+  };
+};
+
+const buildSystemAlerts = (
+  forecasts: DemandForecast[],
+  endpoints: APIEndpoint[],
+  existingAlerts: DemandAlert[] = []
+): DemandAlert[] => {
+  const nextAlerts: DemandAlert[] = [];
+  const latestForecast = forecasts[forecasts.length - 1];
+
+  if (latestForecast) {
+    const latestDate = new Date(latestForecast.date).toLocaleString('default', {
+      month: 'long',
+      year: 'numeric',
+      day: 'numeric',
+    });
+
+    nextAlerts.push(
+      createAlert(
+        {
+          title: 'Data Status',
+          severity: 'low',
+          message: `New tourist accommodation data detected for ${latestDate}.`,
+          threshold: 1,
+          currentValue: 1,
+          timestamp: latestForecast.date,
+          resolved: false,
+          alertType: 'trend',
+        },
+        existingAlerts
+      )
+    );
+  }
+
+  const latestDriftRecord = [...forecasts]
+    .reverse()
+    .find((forecast) => forecast.actualOccupancy > 0 && Math.abs(forecast.predictedOccupancy - forecast.actualOccupancy) / forecast.actualOccupancy >= 0.5);
+
+  if (latestDriftRecord) {
+    const driftRatio = Math.abs(latestDriftRecord.predictedOccupancy - latestDriftRecord.actualOccupancy) / latestDriftRecord.actualOccupancy;
+    const driftDate = new Date(latestDriftRecord.date).toLocaleString('default', {
+      month: 'long',
+      year: 'numeric',
+      day: 'numeric',
+    });
+
+    nextAlerts.push(
+      createAlert(
+        {
+          title: 'Drift Status',
+          severity: 'high',
+          message: `Drift detected on ${driftDate}: actual and predicted tourist data differ by ${Math.round(driftRatio * 100)}%.`,
+          threshold: 0.5,
+          currentValue: Number(driftRatio.toFixed(2)),
+          timestamp: latestDriftRecord.date,
+          resolved: false,
+          alertType: 'drift',
+        },
+        existingAlerts
+      )
+    );
+  }
+
+  endpoints
+    .forEach((endpoint) => {
+      nextAlerts.push(
+        createAlert(
+          {
+            title: 'API Status',
+            severity: endpoint.status === 'active' ? 'low' : 'high',
+            message:
+              endpoint.status === 'active'
+                ? `API connected successfully: ${endpoint.name}.`
+                : `API connection unsuccessful: ${endpoint.name} disconnected from the system.`,
+            threshold: 1,
+            currentValue: endpoint.status === 'active' ? 1 : 0,
+            timestamp: endpoint.lastCheck,
+            resolved: false,
+            alertType: 'anomaly',
+          },
+          existingAlerts
+        )
+      );
+    });
+
+  return nextAlerts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+};
+
 // Generate sample forecast accuracy metrics
 const generateSampleMetrics = (): ForecastMetrics[] => {
   const metrics: ForecastMetrics[] = [];
@@ -16,43 +120,6 @@ const generateSampleMetrics = (): ForecastMetrics[] => {
   }
   return metrics.reverse();
 };
-
-// Generate tourism demand alerts
-const generateSampleAlerts = (): DemandAlert[] => [
-  {
-    id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
-    severity: 'high',
-    message: 'Unexpected surge in bookings detected - Major event影响预测准确性',
-    threshold: 0.15,
-    currentValue: 0.28,
-    resolved: false,
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-    alertType: 'anomaly',
-  },
-  {
-    id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
-    severity: 'medium',
-    message: 'Seasonal pattern shift detected in coastal accommodations',
-    threshold: 0.15,
-    currentValue: 0.18,
-    resolved: false,
-    timestamp: new Date(Date.now() - 7200000).toISOString(),
-    alertType: 'seasonality',
-  },
-  {
-    id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
-    severity: 'low',
-    message: 'Minor trend deviation in weekday occupancy',
-    threshold: 0.15,
-    currentValue: 0.08,
-    resolved: true,
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    alertType: 'trend',
-  },
-];
 
 const generateSampleJobs = (): RetrainingJob[] => [
   {
@@ -153,7 +220,9 @@ const generateSampleForecasts = (): DemandForecast[] => {
     const baseOccupancy = 60 + Math.random() * 80;  // 60-140 rooms
     const seasonalFactor = Math.sin((i / 50) * Math.PI) * 20; // Seasonal variation
     const actualOccupancy = Math.max(10, baseOccupancy + seasonalFactor);
-    const predictedOccupancy = actualOccupancy + (Math.random() - 0.5) * 15;
+    const predictedOccupancy = i === 0
+      ? actualOccupancy * 1.55
+      : actualOccupancy + (Math.random() - 0.5) * 15;
     
     forecasts.push({
       id: uuidv4(),
@@ -203,7 +272,6 @@ const generateSampleForecastInsights = (): ForecastInsights => ({
 
 // Mock data storage
 let mockMetrics = generateSampleMetrics();
-let mockAlerts = generateSampleAlerts();
 let mockJobs = generateSampleJobs();
 let mockEndpoints = generateSampleEndpoints();
 let mockModelVersions = generateSampleModelVersions();
@@ -211,6 +279,7 @@ let mockDataQuality = generateSampleDataQuality();
 let mockForecasts = generateSampleForecasts();
 let mockFeatures = generateSampleFeatures();
 let mockForecastInsights = generateSampleForecastInsights();
+let mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints);
 
 // Simulate real-time data updates
 setInterval(() => {
@@ -230,6 +299,26 @@ setInterval(() => {
     mockMetrics = mockMetrics.slice(-100);
   }
 
+  const baseOccupancy = 60 + Math.random() * 80;
+  const predictedVariance = Math.random() > 0.7 ? 0.55 : 0.18;
+  const actualOccupancy = Number(baseOccupancy.toFixed(1));
+  const predictedOccupancy = Number((baseOccupancy * (1 + predictedVariance)).toFixed(1));
+  const latestForecastDate = new Date();
+
+  mockForecasts.push({
+    id: uuidv4(),
+    actualOccupancy,
+    predictedOccupancy,
+    error: Number(Math.abs(predictedOccupancy - actualOccupancy).toFixed(1)),
+    date: latestForecastDate.toISOString(),
+    location: 'Tourist Accommodation Data',
+    accommodationType: 'Hotel',
+  });
+
+  if (mockForecasts.length > 100) {
+    mockForecasts = mockForecasts.slice(-100);
+  }
+
   // Simulate running job completion
   const runningJob = mockJobs.find(j => j.status === 'running');
   if (runningJob && Math.random() > 0.8) {
@@ -243,6 +332,8 @@ setInterval(() => {
   if (pendingJob && Math.random() > 0.9) {
     pendingJob.status = 'running';
   }
+
+  mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints, mockAlerts);
 }, 30000);
 
 // Mock API Service
@@ -254,6 +345,7 @@ export const mockApi = {
 
   getDemandAlerts: async (): Promise<DemandAlert[]> => {
     await new Promise(resolve => setTimeout(resolve, 200));
+    mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints, mockAlerts);
     return mockAlerts;
   },
 
@@ -301,6 +393,7 @@ export const mockApi = {
       endpoint.lastCheck = new Date().toISOString();
       endpoint.status = Math.random() > 0.2 ? 'active' : 'inactive';
     }
+    mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints, mockAlerts);
     return endpoint || mockEndpoints[0];
   },
 

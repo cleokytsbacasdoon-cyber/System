@@ -10,6 +10,7 @@ export interface ForecastMetrics {
 export interface DemandAlert {
   id: string;
   modelId: string;
+  title?: string;
   severity: 'low' | 'medium' | 'high';
   message: string;
   threshold: number;

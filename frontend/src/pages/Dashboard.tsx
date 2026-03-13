@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { MetricsCard } from '../components/MetricsCard';
 import { DriftAlertCard } from '../components/DriftAlertCard';
@@ -27,6 +27,15 @@ interface DashboardProps {
   onSettingsClick: () => void;
 }
 
+interface TouristTrendParameter {
+  label: string;
+  value: string;
+  endpointName?: string;
+  endpointId?: string;
+  statusLabel: string;
+  note?: string;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const { addToast } = useToast();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
@@ -44,6 +53,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [viewDate, setViewDate] = useState(new Date());
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [readAlertIds, setReadAlertIds] = useState<string[]>([]);
+  const notificationPanelRef = useRef<HTMLDivElement | null>(null);
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -96,15 +108,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       setLoading(false);
     }
   };
-
-  const apiParameters = [
-    'Philippine Holidays',
-    'Average High Temperature',
-    'Average Low Temperature',
-    'Average Precipitation',
-    'Inflation Rate',
-    'Top 10 Market Holidays',
-  ];
 
   const getPHHoliday = (day: number, month: number, year: number) => {
     const holidayMap: { [key: string]: string } = {
@@ -221,6 +224,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
   const unresolvedAlerts = useMemo(() => alerts.filter(a => !a.resolved), [alerts]);
+  const latestThreeAlerts = useMemo(
+    () => [...alerts].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 3),
+    [alerts]
+  );
+  const unreadNotifications = useMemo(
+    () => latestThreeAlerts.filter((alert) => !readAlertIds.includes(alert.id)),
+    [latestThreeAlerts, readAlertIds]
+  );
   const latestForecast = useMemo(
     () => (forecasts.length > 0 ? forecasts[forecasts.length - 1] : null),
     [forecasts]
@@ -296,6 +307,113 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
     return 'N/A';
   }, [dataQuality]);
+  const currentMonthHolidayCount = useMemo(() => {
+    const year = currentDateTime.getFullYear();
+    const month = currentDateTime.getMonth();
+    const totalDays = daysInMonth(year, month);
+    let holidayCount = 0;
+
+    for (let day = 1; day <= totalDays; day += 1) {
+      if (getPHHoliday(day, month, year)) {
+        holidayCount += 1;
+      }
+    }
+
+    return holidayCount;
+  }, [currentDateTime]);
+  const connectedEndpoint = useMemo(
+    () => endpoints.find((endpoint) => endpoint.status === 'active') ?? endpoints[0],
+    [endpoints]
+  );
+  const apiReflectedEndpoint = useMemo(
+    () => endpoints.find((endpoint) => endpoint.name === 'Historical Data Service') ?? connectedEndpoint,
+    [connectedEndpoint, endpoints]
+  );
+  const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
+    const currentMonthLabel = currentDateTime.toLocaleString('default', { month: 'long' });
+    const reflectionLabel = apiReflectedEndpoint
+      ? apiReflectedEndpoint.status === 'active'
+        ? `Connected via ${apiReflectedEndpoint.name}`
+        : `${apiReflectedEndpoint.name} currently disconnected`
+      : 'Awaiting API connection';
+
+    return [
+      {
+        label: 'Peak Season',
+        value: 'Conditions will be added later',
+        statusLabel: 'Manual logic pending',
+        note: 'Conditions for this data will be added later.',
+      },
+      {
+        label: 'Philippine Holidays',
+        value: `${currentMonthHolidayCount} holidays in ${currentMonthLabel}`,
+        endpointId: endpoints[0]?.id,
+        endpointName: endpoints[0]?.name,
+        statusLabel: reflectionLabel,
+        note: 'Displaying the number of holidays in the current month.',
+      },
+      {
+        label: 'Average High Temperature',
+        value: `31.4 C in ${currentMonthLabel}`,
+        endpointId: endpoints[1]?.id,
+        endpointName: endpoints[1]?.name,
+        statusLabel: endpoints[1]
+          ? endpoints[1].status === 'active'
+            ? `Connected via ${endpoints[1].name}`
+            : `${endpoints[1].name} currently disconnected`
+          : 'Awaiting API connection',
+        note: 'Displaying the current month average high temperature in Celsius.',
+      },
+      {
+        label: 'Average Low Temperature',
+        value: `24.8 C in ${currentMonthLabel}`,
+        endpointId: endpoints[1]?.id,
+        endpointName: endpoints[1]?.name,
+        statusLabel: endpoints[1]
+          ? endpoints[1].status === 'active'
+            ? `Connected via ${endpoints[1].name}`
+            : `${endpoints[1].name} currently disconnected`
+          : 'Awaiting API connection',
+        note: 'Displaying the current month average low temperature in Celsius.',
+      },
+      {
+        label: 'Precipitation',
+        value: `12.6 cm in ${currentMonthLabel}`,
+        endpointId: endpoints[2]?.id,
+        endpointName: endpoints[2]?.name,
+        statusLabel: endpoints[2]
+          ? endpoints[2].status === 'active'
+            ? `Connected via ${endpoints[2].name}`
+            : `${endpoints[2].name} currently disconnected`
+          : 'Awaiting API connection',
+        note: 'Displaying the current month precipitation in cm.',
+      },
+      {
+        label: 'Inflation Rate',
+        value: 'Conditions will be added later',
+        statusLabel: 'Manual logic pending',
+        note: 'Conditions for this data will be added later.',
+      },
+      {
+        label: 'is December',
+        value: currentDateTime.getMonth() === 11 ? 'Yes' : 'No',
+        statusLabel: 'Calendar-based parameter',
+        note: 'Conditions for this data will be added later.',
+      },
+      {
+        label: 'is Lockdown',
+        value: 'Conditions will be added later',
+        statusLabel: 'Manual logic pending',
+        note: 'Conditions for this data will be added later.',
+      },
+      {
+        label: 'Top 10 Market Holidays',
+        value: 'Conditions will be added later',
+        statusLabel: 'Manual logic pending',
+        note: 'Conditions for this data will be added later.',
+      },
+    ];
+  }, [apiReflectedEndpoint, currentDateTime, currentMonthHolidayCount, endpoints]);
 
   const tabs = [
     { id: 'overview', label: 'Dashboard', icon: '📊' },
@@ -307,6 +425,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const navigationItems = [...tabs, { id: 'export', label: 'Export', icon: '📥' }, { id: 'about', label: 'About the System', icon: 'ℹ️' }];
   const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
+
+  useEffect(() => {
+    if (!isNotificationOpen || latestThreeAlerts.length === 0) return;
+    setReadAlertIds((prev) => Array.from(new Set([...prev, ...latestThreeAlerts.map((alert) => alert.id)])));
+  }, [isNotificationOpen, latestThreeAlerts]);
+
+  useEffect(() => {
+    if (!isNotificationOpen) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      if (notificationPanelRef.current?.contains(target)) return;
+      if (target.closest('[data-notification-trigger="true"]')) return;
+
+      setIsNotificationOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isNotificationOpen]);
 
   if (loading && metrics.length === 0) {
     return (
@@ -347,7 +487,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           </nav>
 
           <div className="mt-auto pt-6">
-            <div className="flex items-center justify-around mb-4">
+            <div className="relative mb-4 flex items-center justify-around">
+              {isNotificationOpen && (
+                <div ref={notificationPanelRef} className={`absolute bottom-full left-0 mb-3 w-80 rounded-xl border shadow-xl z-20 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'}`}>
+                  <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold">Alert Notifications</p>
+                      <button
+                        onClick={() => setIsNotificationOpen(false)}
+                        className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto p-3 space-y-2">
+                    {latestThreeAlerts.length > 0 ? latestThreeAlerts.map((alert) => (
+                      <div
+                        key={alert.id}
+                        className={`rounded-lg border px-3 py-2 ${isDarkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium">{alert.title || 'Alert Notification'}</p>
+                          {!readAlertIds.includes(alert.id) && <span className="mt-1 h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" />}
+                        </div>
+                        <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{alert.message}</p>
+                        <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          {new Date(alert.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                    )) : (
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>No notifications available</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => setIsNotificationOpen((prev) => !prev)}
+                title="Alert Notifications"
+                data-notification-trigger="true"
+                className={`relative p-3 text-xl rounded-lg transition border ${
+                  unreadNotifications.length > 0
+                    ? 'bg-red-500 border-red-400 text-white hover:bg-red-600'
+                    : isDarkMode
+                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                🔔
+                {unreadNotifications.length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[1.2rem] h-5 px-1 rounded-full bg-red-700 text-white text-[10px] flex items-center justify-center">
+                    {unreadNotifications.length}
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={toggleDarkMode}
                 title={isDarkMode ? 'Light Mode' : 'Dark Mode'}
@@ -413,7 +608,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-2 mt-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+              <button
+                onClick={() => setIsNotificationOpen((prev) => !prev)}
+                data-notification-trigger="true"
+                className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                  unreadNotifications.length > 0
+                    ? 'bg-red-500 text-white'
+                    : isDarkMode
+                    ? 'bg-slate-800 text-gray-100'
+                    : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                🔔 Alerts
+              </button>
               <button
                 onClick={toggleDarkMode}
                 className={`px-3 py-2 rounded-lg text-sm font-medium ${
@@ -427,6 +635,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 className="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white"
               >
                 ⚙️ Settings
+              </button>
+              <button
+                onClick={() => loadData()}
+                className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                  isDarkMode ? 'bg-slate-800 text-gray-100' : 'bg-gray-100 text-gray-700'
+                }`}
+              >
+                🔄 Refresh
               </button>
             </div>
           </div>
@@ -490,41 +706,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   onPredictedMonthsChange={setPredictedMonthsToShow}
                 />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Metrics</p>
-                    <p className="text-3xl font-bold text-blue-500">{metrics.length}</p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Active Alerts</p>
-                    <p className="text-3xl font-bold text-orange-500">{unresolvedAlerts.length}</p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Retraining Jobs</p>
-                    <p className="text-3xl font-bold text-green-500">{jobs.length}</p>
-                  </div>
+                <div className="grid grid-cols-1 gap-4">
                   <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>API Endpoints</p>
-                    <p className="text-3xl font-bold text-purple-500">{endpoints.length}</p>
+                    <p className={`font-semibold mb-3 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>Tourist Trends Data Parameters</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {touristTrendParameters.map((parameter) => {
+                        return (
+                          <button
+                            key={parameter.label}
+                            onClick={() => handleApiParameterAction(parameter.label, parameter.endpointId)}
+                            className={`text-left px-3 py-2 rounded border text-sm transition ${
+                              isDarkMode
+                                ? 'bg-slate-900 border-slate-700 text-gray-100 hover:bg-slate-700'
+                                : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                            }`}
+                          >
+                            <p className="font-medium">{parameter.label}</p>
+                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{parameter.value}</p>
+                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {parameter.statusLabel}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-cyan-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Predicted tourist accommodation demand: Number of tourists of the recent data received</p>
-                    <p className="text-3xl font-bold text-cyan-500">
-                      {latestForecast ? Math.round(latestForecast.actualOccupancy).toLocaleString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-indigo-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Predicted tourist accommodation demand: Forecast for next month</p>
-                    <p className="text-3xl font-bold text-indigo-500">
-                      {nextMonthForecast !== null ? nextMonthForecast.toLocaleString() : 'N/A'}
-                    </p>
-                  </div>
-                </div>
-
-                {latestMetric && <MetricsCard metric={latestMetric} />}
               </div>
             )}
 
@@ -561,26 +769,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {activeTab === 'api' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div>
-                  <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
+                  <h2 className="text-2xl font-bold mb-4">Tourist Trends Data Parameters</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
-                    {apiParameters.map((parameter, index) => {
-                      const mappedEndpoint = endpoints.length > 0 ? endpoints[index % endpoints.length] : undefined;
+                    {touristTrendParameters.map((parameter) => {
                       return (
                         <div
-                          key={parameter}
+                          key={parameter.label}
                           className={`rounded-lg border px-4 py-3 ${
                             isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-gray-50 border-gray-200 text-gray-700'
                           }`}
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <div>
-                              <p className="font-semibold">{parameter}</p>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                Endpoint: {mappedEndpoint ? mappedEndpoint.name : 'Not available'}
+                              <p className="font-semibold">{parameter.label}</p>
+                              <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                                {parameter.value}
                               </p>
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                API reflection: {parameter.statusLabel}
+                              </p>
+                              {parameter.note && (
+                                <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                                  {parameter.note}
+                                </p>
+                              )}
                             </div>
                             <button
-                              onClick={() => handleApiParameterAction(parameter, mappedEndpoint?.id)}
+                              onClick={() => handleApiParameterAction(parameter.label, parameter.endpointId)}
                               className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
                             >
                               Check API

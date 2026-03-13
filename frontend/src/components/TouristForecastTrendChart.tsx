@@ -171,7 +171,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
         position: 'top' as const,
         labels: {
           color: isDarkMode ? '#E5E7EB' : '#374151',
-          padding: 36,
+          padding: 8,
         },
       },
     },
@@ -197,21 +197,24 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
 
   return (
     <div className={`rounded-lg shadow p-4 md:p-6 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-3 mb-4">
+        <div className="hidden sm:block" />
+        <p className={`text-xl md:text-2xl font-bold text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
           Monthly Tourist Trend
         </p>
-        <select
-          value={predictedMonths}
-          onChange={(event) => onPredictedMonthsChange(Number(event.target.value) as 3 | 6 | 12)}
-          className={`w-full sm:w-auto px-3 py-2 rounded border text-sm outline-none ${
-            isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-white border-gray-300 text-gray-700'
-          }`}
-        >
-          <option value={3}>3 months</option>
-          <option value={6}>6 months</option>
-          <option value={12}>12 months</option>
-        </select>
+        <div className="flex sm:justify-end">
+          <select
+            value={predictedMonths}
+            onChange={(event) => onPredictedMonthsChange(Number(event.target.value) as 3 | 6 | 12)}
+            className={`w-full sm:w-auto px-3 py-2 rounded border text-sm outline-none ${
+              isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-white border-gray-300 text-gray-700'
+            }`}
+          >
+            <option value={3}>3 months</option>
+            <option value={6}>6 months</option>
+            <option value={12}>12 months</option>
+          </select>
+        </div>
       </div>
 
       <div className="h-72 md:h-80 mt-2">

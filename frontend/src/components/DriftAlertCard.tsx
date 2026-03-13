@@ -42,13 +42,11 @@ export const DriftAlertCard: React.FC<DriftAlertCardProps> = ({ alert, onResolve
     <div className={`rounded-lg shadow-md p-4 border-l-4 ${getSeverityColor(alert.severity)} ${alert.resolved ? 'opacity-60' : ''}`}>
       <div className="flex justify-between items-start">
         <div className="flex-1">
-          <h4 className="font-semibold mb-2">
-            {alert.message}
+          <h4 className="font-semibold mb-1">
+            {alert.title || 'Alert Notification'}
             {getAlertTypeBadge(alert.alertType)}
           </h4>
-          <p className="text-sm mb-2">
-            Threshold: {alert.threshold.toFixed(4)} | Current: {alert.currentValue.toFixed(4)}
-          </p>
+          <p className="text-sm mb-2">{alert.message}</p>
           <p className="text-xs opacity-75">
             {new Date(alert.timestamp).toLocaleString()}
           </p>
