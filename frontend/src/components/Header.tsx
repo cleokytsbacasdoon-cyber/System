@@ -15,7 +15,7 @@ export const Header: React.FC<HeaderProps> = ({ onSettingsClick }) => {
           <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center font-bold">
             ML
           </div>
-          <h1 className="text-2xl font-bold">ML Monitoring</h1>
+          <h1 className="text-2xl font-bold">Tourist Accommodation Demand Forecasting System</h1>
         </div>
 
         <div className="flex items-center gap-4">

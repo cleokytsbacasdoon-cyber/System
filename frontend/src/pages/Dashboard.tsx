@@ -13,12 +13,13 @@ import {
   getDriftAlerts, 
   getRetrainingJobs, 
   getAPIEndpoints,
+  getDemandForecasts,
   resolveDriftAlert,
   startRetrainingJob,
   checkEndpointStatus 
 } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint } from '../types';
+import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -31,6 +32,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [alerts, setAlerts] = useState<DriftAlert[]>([]);
   const [jobs, setJobs] = useState<RetrainingJob[]>([]);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
+  const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -69,16 +71,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [metricsData, alertsData, jobsData, endpointsData] = await Promise.all([
+      const [metricsData, alertsData, jobsData, endpointsData, forecastsData] = await Promise.all([
         getModelMetrics(),
         getDriftAlerts(),
         getRetrainingJobs(),
         getAPIEndpoints(),
+        getDemandForecasts(),
       ]);
       setMetrics(metricsData);
       setAlerts(alertsData);
       setJobs(jobsData);
       setEndpoints(endpointsData);
+      setForecasts(forecastsData);
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
     } finally {
@@ -194,16 +198,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
   const unresolvedAlerts = useMemo(() => alerts.filter(a => !a.resolved), [alerts]);
+  const latestForecast = useMemo(
+    () => (forecasts.length > 0 ? forecasts[forecasts.length - 1] : null),
+    [forecasts]
+  );
+  const nextMonthForecast = useMemo(() => {
+    if (forecasts.length === 0) return null;
+    const sample = forecasts.slice(-30);
+    const total = sample.reduce((sum, item) => sum + item.predictedOccupancy, 0);
+    return Math.round(total / sample.length);
+  }, [forecasts]);
 
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'overview', label: 'Dashboard', icon: '📊' },
     { id: 'metrics', label: 'Metrics', icon: '📈' },
     { id: 'alerts', label: 'Alerts', icon: '⚠️' },
     { id: 'retraining', label: 'Retraining', icon: '🔄' },
     { id: 'api', label: 'API', icon: '🔗' },
   ];
 
-  const navigationItems = [...tabs, { id: 'export', label: 'Export', icon: '📥' }];
+  const navigationItems = [...tabs, { id: 'export', label: 'Export', icon: '📥' }, { id: 'about', label: 'About the System', icon: 'ℹ️' }];
   const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
   if (loading && metrics.length === 0) {
@@ -222,7 +236,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       <div className="w-full min-h-screen flex">
         <aside className={`hidden md:flex md:w-72 lg:w-80 shrink-0 flex-col border-r p-6 sticky top-0 h-screen ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold">Tourist Prediction Monitoring System</h1>
+            <h1 className="text-2xl font-bold">Tourist Accommodation Demand Forecasting System</h1>
           </div>
 
           <nav className="space-y-2">
@@ -238,8 +252,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
-                <span>{item.icon}</span>
-                <span className="font-medium">{item.label}</span>
+                <span className="w-6 text-center text-lg font-semibold">{item.icon}</span>
+                <span className="font-semibold text-lg">{item.label}</span>
               </button>
             ))}
           </nav>
@@ -290,7 +304,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         <main className="flex-1 min-w-0">
           <div className={`md:hidden px-4 py-4 border-b sticky top-0 z-10 ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
             <div className="flex items-center justify-between mb-3">
-              <h1 className="text-xl font-bold">Tourist Prediction Monitoring System</h1>
+              <h1 className="text-xl font-bold">Tourist Accommodation Demand Forecasting System</h1>
               <p className="text-xs opacity-80">{currentDateTime.toLocaleTimeString()}</p>
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1">
@@ -298,7 +312,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-3 py-2 rounded-lg whitespace-nowrap text-sm ${
+                  className={`px-3 py-2 rounded-lg whitespace-nowrap text-base font-semibold flex items-center gap-2 ${
                     activeTab === item.id
                       ? 'bg-blue-600 text-white'
                       : isDarkMode
@@ -306,7 +320,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                       : 'bg-gray-100 text-gray-700'
                   }`}
                 >
-                  {item.icon} {item.label}
+                  <span className="text-base leading-none">{item.icon}</span>
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -333,7 +348,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
             </div>
 
-            {/* Overview Tab */}
+            {/* Dashboard Tab */}
             {activeTab === 'overview' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -354,6 +369,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <p className="text-3xl font-bold text-purple-500">{endpoints.length}</p>
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-cyan-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Predicted tourist accommodation demand: Number of tourists of the recent data received</p>
+                    <p className="text-3xl font-bold text-cyan-500">
+                      {latestForecast ? Math.round(latestForecast.actualOccupancy).toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-indigo-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Predicted tourist accommodation demand: Forecast for next month</p>
+                    <p className="text-3xl font-bold text-indigo-500">
+                      {nextMonthForecast !== null ? nextMonthForecast.toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                </div>
+
                 {latestMetric && <MetricsCard metric={latestMetric} />}
                 <DriftStats alerts={alerts} />
                 <RetrainingStats jobs={jobs} />
@@ -491,6 +522,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {activeTab === 'export' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
+              </div>
+            )}
+
+            {/* About the System Tab */}
+            {activeTab === 'about' && (
+              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div>
+                  <h3 className="text-2xl font-bold mb-3">Tourist Accommodation Demand Forecasting System</h3>
+                  <p className={`${isDarkMode ? 'text-gray-200' : 'text-gray-700'} leading-relaxed`}>
+                    This system helps forecast the future demand for tourist accommodations in Panglao, Bohol by analyzing tourism data and external factors such as Philippine holidays, average high temperature, average low temperature, average precipitation, inflation rate, and top 10 market holidays. It supports local tourism stakeholders in making informed decisions for planning and resource management.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="text-xl font-semibold mb-3">System Overview</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className="font-semibold mb-2">Forecasting and Monitoring</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm`}>
+                        Tracks demand forecasting metrics, drift alerts, and retraining activities to keep model performance reliable.
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className="font-semibold mb-2">Decision Support</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm`}>
+                        Provides actionable insights for accommodation planning, staffing, and resource allocation across peak and off-peak periods.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
