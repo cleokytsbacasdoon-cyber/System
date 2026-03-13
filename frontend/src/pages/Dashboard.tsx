@@ -14,12 +14,13 @@ import {
   getRetrainingJobs, 
   getAPIEndpoints,
   getDemandForecasts,
+  getDataQuality,
   resolveDriftAlert,
   startRetrainingJob,
   checkEndpointStatus 
 } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast } from '../types';
+import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -33,6 +34,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [jobs, setJobs] = useState<RetrainingJob[]>([]);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
+  const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [refreshInterval, setRefreshInterval] = useState(30);
@@ -71,18 +73,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [metricsData, alertsData, jobsData, endpointsData, forecastsData] = await Promise.all([
+      const [metricsData, alertsData, jobsData, endpointsData, forecastsData, qualityData] = await Promise.all([
         getModelMetrics(),
         getDriftAlerts(),
         getRetrainingJobs(),
         getAPIEndpoints(),
         getDemandForecasts(),
+        getDataQuality(),
       ]);
       setMetrics(metricsData);
       setAlerts(alertsData);
       setJobs(jobsData);
       setEndpoints(endpointsData);
       setForecasts(forecastsData);
+      setDataQuality(qualityData);
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
     } finally {
@@ -208,6 +212,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     const total = sample.reduce((sum, item) => sum + item.predictedOccupancy, 0);
     return Math.round(total / sample.length);
   }, [forecasts]);
+  const latestDataMonth = useMemo(() => {
+    if (!latestForecast) return 'Latest Month';
+    return new Date(latestForecast.date).toLocaleString('default', { month: 'long' });
+  }, [latestForecast]);
+  const nextForecastMonth = useMemo(() => {
+    if (!latestForecast) return 'Next Month';
+    const date = new Date(latestForecast.date);
+    date.setMonth(date.getMonth() + 1);
+    return date.toLocaleString('default', { month: 'long' });
+  }, [latestForecast]);
+  const bestModelUsed = useMemo(() => {
+    const completed = jobs.filter((job) => job.status === 'completed');
+    if (completed.length === 0) return 'N/A';
+    const best = completed.reduce((currentBest, job) => {
+      const currentAccuracy = currentBest.accuracy ?? 0;
+      const nextAccuracy = job.accuracy ?? 0;
+      return nextAccuracy > currentAccuracy ? job : currentBest;
+    }, completed[0]);
+    return best.modelId;
+  }, [jobs]);
+  const submissionRate = useMemo(() => {
+    if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
+    return 'N/A';
+  }, [dataQuality]);
 
   const tabs = [
     { id: 'overview', label: 'Dashboard', icon: '📊' },
@@ -236,7 +264,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       <div className="w-full min-h-screen flex">
         <aside className={`hidden md:flex md:w-72 lg:w-80 shrink-0 flex-col border-r p-6 sticky top-0 h-screen ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold">Tourist Accommodation Demand Forecasting System</h1>
+            <h1 className="text-2xl font-bold">Panglao Tourist Accommodation Demand Forecasting System</h1>
           </div>
 
           <nav className="space-y-2">
@@ -304,7 +332,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         <main className="flex-1 min-w-0">
           <div className={`md:hidden px-4 py-4 border-b sticky top-0 z-10 ${isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
             <div className="flex items-center justify-between mb-3">
-              <h1 className="text-xl font-bold">Tourist Accommodation Demand Forecasting System</h1>
+              <h1 className="text-xl font-bold">Panglao Tourist Accommodation Demand Forecasting System</h1>
               <p className="text-xs opacity-80">{currentDateTime.toLocaleTimeString()}</p>
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1">
@@ -351,6 +379,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Dashboard Tab */}
             {activeTab === 'overview' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Latest Total Tourist of ${latestDataMonth}`}</p>
+                    <p className="text-3xl font-bold text-blue-500">
+                      {latestForecast ? Math.round(latestForecast.actualOccupancy).toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Submission Rate</p>
+                    <p className="text-3xl font-bold text-orange-500">{submissionRate}</p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist for ${nextForecastMonth}`}</p>
+                    <p className="text-3xl font-bold text-green-500">
+                      {nextMonthForecast !== null ? nextMonthForecast.toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
+                    <p className="text-xl font-bold text-purple-500 break-all">{bestModelUsed}</p>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Metrics</p>
@@ -529,7 +580,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {activeTab === 'about' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div>
-                  <h3 className="text-2xl font-bold mb-3">Tourist Accommodation Demand Forecasting System</h3>
+                  <h3 className="text-2xl font-bold mb-3">Panglao Tourist Accommodation Demand Forecasting System</h3>
                   <p className={`${isDarkMode ? 'text-gray-200' : 'text-gray-700'} leading-relaxed`}>
                     This system helps forecast the future demand for tourist accommodations in Panglao, Bohol by analyzing tourism data and external factors such as Philippine holidays, average high temperature, average low temperature, average precipitation, inflation rate, and top 10 market holidays. It supports local tourism stakeholders in making informed decisions for planning and resource management.
                   </p>
