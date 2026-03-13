@@ -171,7 +171,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
         position: 'top' as const,
         labels: {
           color: isDarkMode ? '#E5E7EB' : '#374151',
-          padding: 8,
+          padding: 48,
         },
       },
     },
@@ -197,7 +197,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
 
   return (
     <div className={`rounded-lg shadow p-4 md:p-6 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
-      <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2 mb-0">
         <div className="hidden sm:block" />
         <p className={`text-xl md:text-2xl font-bold text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
           Monthly Tourist Trend
@@ -217,7 +217,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
         </div>
       </div>
 
-      <div className="h-72 md:h-80 mt-2">
+      <div className="h-72 md:h-80 mt-0">
         <Line data={data} options={options} />
       </div>
     </div>

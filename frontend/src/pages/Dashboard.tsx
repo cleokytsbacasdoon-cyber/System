@@ -20,6 +20,7 @@ import {
   startRetrainingJob,
   checkEndpointStatus 
 } from '../services/api';
+import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
 import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality } from '../types';
 
@@ -323,18 +324,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return holidayCount;
   }, [currentDateTime]);
   const currentMonth = currentDateTime.getMonth();
-  const monthHighTempC = useMemo(() => {
-    const monthlyHighs = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
-    return monthlyHighs[currentMonth];
-  }, [currentMonth]);
-  const monthLowTempC = useMemo(() => {
-    const monthlyLows = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
-    return monthlyLows[currentMonth];
-  }, [currentMonth]);
-  const monthPrecipitationCm = useMemo(() => {
-    const monthlyPrecipitation = [7.2, 6.8, 5.9, 4.8, 9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
-    return monthlyPrecipitation[currentMonth];
-  }, [currentMonth]);
+
+  // Weather data fetched from Open-Meteo API (falls back to climatological averages)
+  const [weatherData, setWeatherData] = useState<MonthlyWeather | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  useEffect(() => {
+    setWeatherLoading(true);
+    fetchMonthlyWeather(currentDateTime.getFullYear(), currentMonth)
+      .then((data) => setWeatherData(data))
+      .finally(() => setWeatherLoading(false));
+  }, [currentMonth, currentDateTime.getFullYear()]);
+
+  // Fallback arrays used while loading or if API is unavailable
+  const FALLBACK_HIGH = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
+  const FALLBACK_LOW  = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
+  const FALLBACK_PREC = [7.2,  6.8,  5.9,  4.8,  9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
+
+  const monthHighTempC       = weatherData?.avgHighTemp        ?? FALLBACK_HIGH[currentMonth];
+  const monthLowTempC        = weatherData?.avgLowTemp         ?? FALLBACK_LOW[currentMonth];
+  const monthPrecipitationCm = weatherData?.totalPrecipitation ?? FALLBACK_PREC[currentMonth];
+  const weatherSource        = weatherData?.source ?? 'fallback';
   const isPeakSeason = useMemo(() => {
     const peakSeasonMonths = [2, 3, 4, 11];
     return peakSeasonMonths.includes(currentMonth) ? 1 : 0;
@@ -374,39 +383,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Average High Temperature',
-        value: `${monthHighTempC.toFixed(1)} C`,
+        value: weatherLoading ? 'Loading…' : `${Number(monthHighTempC).toFixed(1)} °C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
-        statusLabel: endpoints[1]
-          ? endpoints[1].status === 'active'
-            ? `Connected via ${endpoints[1].name}`
-            : `${endpoints[1].name} currently disconnected`
-          : 'Awaiting API connection',
-        note: 'Displaying the current month average high temperature in Celsius.',
+        statusLabel: weatherLoading
+          ? 'Fetching from Open-Meteo…'
+          : weatherSource === 'api'
+          ? 'Live data via Open-Meteo API'
+          : 'Using climatological average (API unavailable)',
+        note: 'Average daily high temperature for the current month in Celsius.',
       },
       {
         label: 'Average Low Temperature',
-        value: `${monthLowTempC.toFixed(1)} C`,
+        value: weatherLoading ? 'Loading…' : `${Number(monthLowTempC).toFixed(1)} °C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
-        statusLabel: endpoints[1]
-          ? endpoints[1].status === 'active'
-            ? `Connected via ${endpoints[1].name}`
-            : `${endpoints[1].name} currently disconnected`
-          : 'Awaiting API connection',
-        note: 'Displaying the current month average low temperature in Celsius.',
+        statusLabel: weatherLoading
+          ? 'Fetching from Open-Meteo…'
+          : weatherSource === 'api'
+          ? 'Live data via Open-Meteo API'
+          : 'Using climatological average (API unavailable)',
+        note: 'Average daily low temperature for the current month in Celsius.',
       },
       {
         label: 'Precipitation',
-        value: `${monthPrecipitationCm.toFixed(1)} cm`,
+        value: weatherLoading ? 'Loading…' : `${Number(monthPrecipitationCm).toFixed(1)} cm`,
         endpointId: endpoints[2]?.id,
         endpointName: endpoints[2]?.name,
-        statusLabel: endpoints[2]
-          ? endpoints[2].status === 'active'
-            ? `Connected via ${endpoints[2].name}`
-            : `${endpoints[2].name} currently disconnected`
-          : 'Awaiting API connection',
-        note: 'Displaying the current month precipitation in cm.',
+        statusLabel: weatherLoading
+          ? 'Fetching from Open-Meteo…'
+          : weatherSource === 'api'
+          ? 'Live data via Open-Meteo API'
+          : 'Using climatological average (API unavailable)',
+        note: 'Total precipitation for the current month in centimetres.',
       },
       {
         label: 'Inflation Rate',
@@ -445,6 +454,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
+    weatherLoading,
+    weatherSource,
   ]);
 
   const tabs = [
