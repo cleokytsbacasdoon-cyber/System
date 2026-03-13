@@ -362,7 +362,7 @@ When accessing a real backend:
 
 - **Frontend Features**: See [frontend/FEATURES.md](./frontend/FEATURES.md) (50+ pages of component details)
 - **Performance Tips**: See [frontend/PERFORMANCE.md](./frontend/PERFORMANCE.md)
-- **Enhancements Made**: See [frontend/ENHANCEMENTS.md](./frontend/ENHANCEMENTS.md)
+- **Enhancements Made**: See [docs/archive/frontend/ENHANCEMENTS.md](./docs/archive/frontend/ENHANCEMENTS.md)
 - **Main README**: See [README.md](./README.md)
 
 ---

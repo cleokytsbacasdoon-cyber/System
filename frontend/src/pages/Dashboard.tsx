@@ -55,6 +55,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [readAlertIds, setReadAlertIds] = useState<string[]>([]);
+  const [inflationRateInput, setInflationRateInput] = useState('3.2');
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
 
   const months = [
@@ -321,6 +322,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
     return holidayCount;
   }, [currentDateTime]);
+  const currentMonth = currentDateTime.getMonth();
+  const monthHighTempC = useMemo(() => {
+    const monthlyHighs = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
+    return monthlyHighs[currentMonth];
+  }, [currentMonth]);
+  const monthLowTempC = useMemo(() => {
+    const monthlyLows = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
+    return monthlyLows[currentMonth];
+  }, [currentMonth]);
+  const monthPrecipitationCm = useMemo(() => {
+    const monthlyPrecipitation = [7.2, 6.8, 5.9, 4.8, 9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
+    return monthlyPrecipitation[currentMonth];
+  }, [currentMonth]);
+  const isPeakSeason = useMemo(() => {
+    const peakSeasonMonths = [2, 3, 4, 11];
+    return peakSeasonMonths.includes(currentMonth) ? 1 : 0;
+  }, [currentMonth]);
+  const isDecember = useMemo(() => (currentMonth === 11 ? 1 : 0), [currentMonth]);
+  const isLockdown = 0;
   const connectedEndpoint = useMemo(
     () => endpoints.find((endpoint) => endpoint.status === 'active') ?? endpoints[0],
     [endpoints]
@@ -340,13 +360,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return [
       {
         label: 'Peak Season',
-        value: 'Conditions will be added later',
+        value: isPeakSeason === 1 ? 'Yes' : 'No',
         statusLabel: 'Manual logic pending',
-        note: 'Conditions for this data will be added later.',
+        note: 'Binary: Yes = 1, No = 0.',
       },
       {
         label: 'Philippine Holidays',
-        value: `${currentMonthHolidayCount} holidays in ${currentMonthLabel}`,
+        value: `${currentMonthHolidayCount} holidays`,
         endpointId: endpoints[0]?.id,
         endpointName: endpoints[0]?.name,
         statusLabel: reflectionLabel,
@@ -354,7 +374,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Average High Temperature',
-        value: `31.4 C in ${currentMonthLabel}`,
+        value: `${monthHighTempC.toFixed(1)} C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
         statusLabel: endpoints[1]
@@ -366,7 +386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Average Low Temperature',
-        value: `24.8 C in ${currentMonthLabel}`,
+        value: `${monthLowTempC.toFixed(1)} C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
         statusLabel: endpoints[1]
@@ -378,7 +398,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Precipitation',
-        value: `12.6 cm in ${currentMonthLabel}`,
+        value: `${monthPrecipitationCm.toFixed(1)} cm`,
         endpointId: endpoints[2]?.id,
         endpointName: endpoints[2]?.name,
         statusLabel: endpoints[2]
@@ -390,30 +410,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Inflation Rate',
-        value: 'Conditions will be added later',
+        value: `${inflationRateInput}%`,
         statusLabel: 'Manual logic pending',
-        note: 'Conditions for this data will be added later.',
+        note: 'Input value is reflected in this parameter.',
       },
       {
         label: 'is December',
-        value: currentDateTime.getMonth() === 11 ? 'Yes' : 'No',
+        value: isDecember === 1 ? 'Yes' : 'No',
         statusLabel: 'Calendar-based parameter',
-        note: 'Conditions for this data will be added later.',
+        note: 'Binary: Yes = 1, No = 0.',
       },
       {
         label: 'is Lockdown',
-        value: 'Conditions will be added later',
+        value: isLockdown === 1 ? 'Yes' : 'No',
         statusLabel: 'Manual logic pending',
-        note: 'Conditions for this data will be added later.',
+        note: 'Binary: Yes = 1, No = 0.',
       },
       {
         label: 'Top 10 Market Holidays',
-        value: 'Conditions will be added later',
+        value: 'Will be reflected in data later',
         statusLabel: 'Manual logic pending',
-        note: 'Conditions for this data will be added later.',
+        note: 'Top 10 countries with highest tourist count in current month.',
       },
     ];
-  }, [apiReflectedEndpoint, currentDateTime, currentMonthHolidayCount, endpoints]);
+  }, [
+    apiReflectedEndpoint,
+    currentDateTime,
+    currentMonthHolidayCount,
+    endpoints,
+    inflationRateInput,
+    isDecember,
+    isLockdown,
+    isPeakSeason,
+    monthHighTempC,
+    monthLowTempC,
+    monthPrecipitationCm,
+  ]);
 
   const tabs = [
     { id: 'overview', label: 'Dashboard', icon: '📊' },
@@ -712,21 +744,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {touristTrendParameters.map((parameter) => {
                         return (
-                          <button
+                          <div
                             key={parameter.label}
-                            onClick={() => handleApiParameterAction(parameter.label, parameter.endpointId)}
                             className={`text-left px-3 py-2 rounded border text-sm transition ${
                               isDarkMode
-                                ? 'bg-slate-900 border-slate-700 text-gray-100 hover:bg-slate-700'
-                                : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                                ? 'bg-slate-900 border-slate-700 text-gray-100'
+                                : 'bg-gray-50 border-gray-200 text-gray-700'
                             }`}
                           >
-                            <p className="font-medium">{parameter.label}</p>
-                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{parameter.value}</p>
-                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              {parameter.statusLabel}
-                            </p>
-                          </button>
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="font-medium">{parameter.label}</p>
+                              <p className={`text-sm font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>{parameter.value}</p>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
@@ -757,6 +787,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Retraining Tab */}
             {activeTab === 'retraining' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                  <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                    Inflation Rate Input (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={inflationRateInput}
+                    onChange={(e) => setInflationRateInput(e.target.value)}
+                    className={`mt-2 w-full md:w-64 p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  />
+                </div>
+
                 <RetrainingStats jobs={jobs} />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">

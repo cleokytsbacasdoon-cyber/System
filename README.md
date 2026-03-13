@@ -159,12 +159,15 @@ npm run type-check    # TypeScript type checking
 
 ## 📚 Documentation
 
+- **[docs/README.md](./docs/README.md)** - Documentation map (active vs archived)
 - **[QUICKSTART.md](./QUICKSTART.md)** - 5-minute quick start guide
 - **[SETUP.md](./SETUP.md)** - Detailed setup instructions (backend optional)
 - **[frontend/README.md](./frontend/README.md)** - Frontend documentation
 - **[frontend/FEATURES.md](./frontend/FEATURES.md)** - Component guide (50+ pages)
 - **[frontend/PERFORMANCE.md](./frontend/PERFORMANCE.md)** - Performance tips & testing
-- **[frontend/ENHANCEMENTS.md](./frontend/ENHANCEMENTS.md)** - What's included
+- **[docs/archive/frontend/ENHANCEMENTS.md](./docs/archive/frontend/ENHANCEMENTS.md)** - What's included
+
+Archived implementation and comparison notes are stored under `docs/archive/` to keep the project root clean.
 
 ## 🎨 UI Preview
 
