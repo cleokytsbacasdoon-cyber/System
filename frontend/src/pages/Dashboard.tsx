@@ -8,6 +8,7 @@ import { PerformanceChart } from '../components/PerformanceChart';
 import { DriftStats } from '../components/DriftStats';
 import { RetrainingStats } from '../components/RetrainingStats';
 import { DataExport } from '../components/DataExport';
+import { TouristForecastTrendChart } from '../components/TouristForecastTrendChart';
 import { 
   getModelMetrics, 
   getDriftAlerts, 
@@ -38,6 +39,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [refreshInterval, setRefreshInterval] = useState(30);
+  const [predictedMonthsToShow, setPredictedMonthsToShow] = useState<3 | 6 | 12>(3);
   const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
@@ -401,6 +403,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <p className="text-xl font-bold text-purple-500 break-all">{bestModelUsed}</p>
                   </div>
                 </div>
+
+                <TouristForecastTrendChart
+                  forecasts={forecasts}
+                  predictedMonths={predictedMonthsToShow}
+                  onPredictedMonthsChange={setPredictedMonthsToShow}
+                />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
