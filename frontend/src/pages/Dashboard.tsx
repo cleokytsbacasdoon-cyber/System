@@ -42,6 +42,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [predictedMonthsToShow, setPredictedMonthsToShow] = useState<3 | 6 | 12>(3);
   const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
+  const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   const months = [
@@ -202,11 +203,68 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     setViewDate(newDate);
   };
 
+  const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const month = parseInt(e.target.value, 10);
+    setSelectedDashboardDate((prev) => {
+      const base = prev ?? new Date();
+      return new Date(base.getFullYear(), month, 1);
+    });
+  };
+
+  const handleDashboardYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const year = parseInt(e.target.value, 10);
+    setSelectedDashboardDate((prev) => {
+      const base = prev ?? new Date();
+      return new Date(year, base.getMonth(), 1);
+    });
+  };
+
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
   const unresolvedAlerts = useMemo(() => alerts.filter(a => !a.resolved), [alerts]);
   const latestForecast = useMemo(
     () => (forecasts.length > 0 ? forecasts[forecasts.length - 1] : null),
     [forecasts]
+  );
+  const monthlyForecastMap = useMemo(() => {
+    return forecasts.reduce<Record<string, { actualTotal: number; predictedTotal: number }>>((acc, item) => {
+      const date = new Date(item.date);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+
+      if (!acc[key]) {
+        acc[key] = { actualTotal: 0, predictedTotal: 0 };
+      }
+
+      acc[key].actualTotal += item.actualOccupancy;
+      acc[key].predictedTotal += item.predictedOccupancy;
+      return acc;
+    }, {});
+  }, [forecasts]);
+
+  useEffect(() => {
+    if (selectedDashboardDate || forecasts.length === 0) return;
+    const latestDate = new Date(forecasts[forecasts.length - 1].date);
+    setSelectedDashboardDate(new Date(latestDate.getFullYear(), latestDate.getMonth(), 1));
+  }, [forecasts, selectedDashboardDate]);
+
+  const dashboardMonth = useMemo(() => {
+    if (selectedDashboardDate) return selectedDashboardDate.getMonth();
+    if (latestForecast) return new Date(latestForecast.date).getMonth();
+    return new Date().getMonth();
+  }, [selectedDashboardDate, latestForecast]);
+
+  const dashboardYear = useMemo(() => {
+    if (selectedDashboardDate) return selectedDashboardDate.getFullYear();
+    if (latestForecast) return new Date(latestForecast.date).getFullYear();
+    return new Date().getFullYear();
+  }, [selectedDashboardDate, latestForecast]);
+
+  const selectedDashboardData = useMemo(() => {
+    return monthlyForecastMap[`${dashboardYear}-${dashboardMonth}`] ?? null;
+  }, [monthlyForecastMap, dashboardYear, dashboardMonth]);
+
+  const dashboardMonthLabel = useMemo(
+    () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
+    [dashboardYear, dashboardMonth]
   );
   const nextMonthForecast = useMemo(() => {
     if (forecasts.length === 0) return null;
@@ -374,8 +432,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           </div>
 
           <div className="px-4 md:px-8 xl:px-10 py-8">
-            <div className="mb-8">
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
+              {activeTab === 'overview' && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <select
+                    value={dashboardMonth}
+                    onChange={handleDashboardMonthChange}
+                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  >
+                    {months.map((month, i) => (
+                      <option key={month} value={i}>{month}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={dashboardYear}
+                    onChange={handleDashboardYearChange}
+                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  >
+                    {years.map((year) => (
+                      <option key={year} value={year}>{year}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Dashboard Tab */}
@@ -383,9 +463,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Latest Total Tourist of ${latestDataMonth}`}</p>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
                     <p className="text-3xl font-bold text-blue-500">
-                      {latestForecast ? Math.round(latestForecast.actualOccupancy).toLocaleString() : 'N/A'}
+                      {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
@@ -393,9 +473,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <p className="text-3xl font-bold text-orange-500">{submissionRate}</p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist for ${nextForecastMonth}`}</p>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
                     <p className="text-3xl font-bold text-green-500">
-                      {nextMonthForecast !== null ? nextMonthForecast.toLocaleString() : 'N/A'}
+                      {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
@@ -445,8 +525,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 </div>
 
                 {latestMetric && <MetricsCard metric={latestMetric} />}
-                <DriftStats alerts={alerts} />
-                <RetrainingStats jobs={jobs} />
               </div>
             )}
 
@@ -461,6 +539,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Alerts Tab */}
             {activeTab === 'alerts' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <DriftStats alerts={alerts} />
                 <div className="space-y-4">
                   {alerts.length > 0 ? alerts.map(alert => <DriftAlertCard key={alert.id} alert={alert} onResolve={handleResolveAlert} />) : <p>No alerts</p>}
                 </div>
@@ -470,6 +549,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Retraining Tab */}
             {activeTab === 'retraining' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <RetrainingStats jobs={jobs} />
+
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
                 </div>
