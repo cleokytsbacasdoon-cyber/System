@@ -31,7 +31,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onClose, asModal = f
 
   const [hasChanges, setHasChanges] = useState(false);
 
-  const handleChange = (key: keyof Settings, value: any) => {
+  const handleChange = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings(prev => ({
       ...prev,
       [key]: value,

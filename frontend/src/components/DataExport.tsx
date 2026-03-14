@@ -11,7 +11,7 @@ interface DataExportProps {
 
 export const DataExport: React.FC<DataExportProps> = ({ metrics, alerts, jobs, endpoints }) => {
   const { isDarkMode } = useDarkMode();
-  const exportToJSON = (data: any, filename: string) => {
+  const exportToJSON = <T,>(data: T, filename: string) => {
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -24,16 +24,19 @@ export const DataExport: React.FC<DataExportProps> = ({ metrics, alerts, jobs, e
     URL.revokeObjectURL(url);
   };
 
-  const exportToCSV = (data: any[], filename: string) => {
+  const exportToCSV = <T extends object>(data: T[], filename: string) => {
     if (data.length === 0) return;
     
-    const headers = Object.keys(data[0]);
+    const headers = Object.keys(data[0]) as Array<keyof T>;
     const csv = [
       headers.join(','),
       ...data.map(row =>
         headers.map(header => {
           const value = row[header];
-          return typeof value === 'string' && value.includes(',') ? `"${value}"` : value;
+          if (typeof value === 'string' && value.includes(',')) {
+            return `"${value}"`;
+          }
+          return String(value ?? '');
         }).join(',')
       )
     ].join('\n');

@@ -63,7 +63,7 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ metrics, title = 'Fo
       title: {
         display: true,
         text: title,
-        font: { size: 16, weight: 'bold' as any },
+        font: { size: 16, weight: 'bold' as const },
         color: isDarkMode ? '#f3f4f6' : '#1f2937',
       },
     },

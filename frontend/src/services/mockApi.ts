@@ -14,8 +14,8 @@ const createAlert = (
   return {
     id: existingMatch?.id || uuidv4(),
     modelId: ALERT_MODEL_ID,
-    resolved: existingMatch?.resolved ?? partial.resolved,
     ...partial,
+    resolved: existingMatch?.resolved ?? partial.resolved,
   };
 };
 
@@ -272,13 +272,13 @@ const generateSampleForecastInsights = (): ForecastInsights => ({
 
 // Mock data storage
 let mockMetrics = generateSampleMetrics();
-let mockJobs = generateSampleJobs();
-let mockEndpoints = generateSampleEndpoints();
-let mockModelVersions = generateSampleModelVersions();
-let mockDataQuality = generateSampleDataQuality();
+const mockJobs = generateSampleJobs();
+const mockEndpoints = generateSampleEndpoints();
+const mockModelVersions = generateSampleModelVersions();
+const mockDataQuality = generateSampleDataQuality();
 let mockForecasts = generateSampleForecasts();
-let mockFeatures = generateSampleFeatures();
-let mockForecastInsights = generateSampleForecastInsights();
+const mockFeatures = generateSampleFeatures();
+const mockForecastInsights = generateSampleForecastInsights();
 let mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints);
 
 // Simulate real-time data updates

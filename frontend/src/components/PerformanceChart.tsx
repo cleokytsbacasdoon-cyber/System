@@ -24,10 +24,10 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({ latest, titl
       {
         label: 'Metric Value',
         data: [
-          (latest.accuracy * 100).toFixed(2),
-          (latest.precision * 100).toFixed(2),
-          (latest.recall * 100).toFixed(2),
-          (latest.f1Score * 100).toFixed(2),
+          Number(latest.mape.toFixed(2)),
+          Number(latest.rmse.toFixed(2)),
+          Number(latest.mae.toFixed(2)),
+          Number((latest.r2Score * 100).toFixed(2)),
         ],
         backgroundColor: [
           '#3B82F6',
@@ -54,7 +54,7 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({ latest, titl
       title: {
         display: true,
         text: title,
-        font: { size: 16, weight: 'bold' as any },
+        font: { size: 16, weight: 'bold' as const },
         color: isDarkMode ? '#f3f4f6' : '#1f2937',
       },
     },

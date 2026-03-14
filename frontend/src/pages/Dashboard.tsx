@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { MetricsCard } from '../components/MetricsCard';
 import { RetrainingJobCard } from '../components/RetrainingJobCard';
 import { MetricsChart } from '../components/MetricsChart';
 import { PerformanceChart } from '../components/PerformanceChart';
@@ -37,16 +36,12 @@ interface TouristTrendParameter {
 type DashboardIconName =
   | 'dashboard'
   | 'metrics'
-  | 'alerts'
   | 'retraining'
-  | 'api'
-  | 'export'
   | 'info'
   | 'notification'
   | 'sun'
   | 'moon'
-  | 'settings'
-  | 'refresh';
+  | 'settings';
 
 interface DashboardIconProps {
   name: DashboardIconName;
@@ -83,14 +78,6 @@ const DashboardIcon: React.FC<DashboardIconProps> = ({ name, className = 'h-5 w-
           <path d="M18 7h2v2" />
         </svg>
       );
-    case 'alerts':
-      return (
-        <svg {...baseProps}>
-          <path d="M12 3L2.8 19h18.4L12 3z" />
-          <path d="M12 9v4" />
-          <path d="M12 16h.01" />
-        </svg>
-      );
     case 'retraining':
       return (
         <svg {...baseProps}>
@@ -98,22 +85,6 @@ const DashboardIcon: React.FC<DashboardIconProps> = ({ name, className = 'h-5 w-
           <path d="M18 2.5v4h-4" />
           <path d="M21 12a9 9 0 0 1-15.3 6.3" />
           <path d="M6 21.5v-4h4" />
-        </svg>
-      );
-    case 'api':
-      return (
-        <svg {...baseProps}>
-          <path d="M8.5 8.5l7 7" />
-          <path d="M8.5 15.5l-2 2a3 3 0 1 1-4.2-4.2l2-2" />
-          <path d="M15.5 8.5l2-2a3 3 0 1 1 4.2 4.2l-2 2" />
-        </svg>
-      );
-    case 'export':
-      return (
-        <svg {...baseProps}>
-          <path d="M12 3v10" />
-          <path d="M8.5 9.5L12 13l3.5-3.5" />
-          <path d="M4 15.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5" />
         </svg>
       );
     case 'info':
@@ -158,15 +129,6 @@ const DashboardIcon: React.FC<DashboardIconProps> = ({ name, className = 'h-5 w-
           <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.8 1.8 0 0 1-3.6 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.8 1.8 0 0 1 0-3.6h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a1.8 1.8 0 0 1 3.6 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a1.8 1.8 0 0 1 0 3.6h-.2a1 1 0 0 0-.9.6z" />
         </svg>
       );
-    case 'refresh':
-      return (
-        <svg {...baseProps}>
-          <path d="M20 5v5h-5" />
-          <path d="M4 19v-5h5" />
-          <path d="M20 10a8 8 0 0 0-13.7-5.7L5 5" />
-          <path d="M4 14a8 8 0 0 0 13.7 5.7L19 19" />
-        </svg>
-      );
     default:
       return null;
   }
@@ -209,12 +171,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, []);
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, refreshInterval * 1000);
-    return () => clearInterval(interval);
-  }, [refreshInterval]);
-
-  useEffect(() => {
     const clockTimer = setInterval(() => {
       setCurrentDateTime(new Date());
     }, 1000);
@@ -222,7 +178,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return () => clearInterval(clockTimer);
   }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [metricsData, alertsData, jobsData, endpointsData, forecastsData, qualityData] = await Promise.all([
@@ -244,7 +200,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
+
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(() => {
+      loadData();
+    }, refreshInterval * 1000);
+    return () => clearInterval(interval);
+  }, [loadData, refreshInterval]);
 
   const getPHHoliday = (day: number, month: number, year: number) => {
     const holidayMap: { [key: string]: string } = {
@@ -350,7 +314,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   };
 
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
-  const unresolvedAlerts = useMemo(() => alerts.filter(a => !a.resolved), [alerts]);
   const latestThreeAlerts = useMemo(
     () => [...alerts].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 3),
     [alerts]
@@ -404,22 +367,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
     [dashboardYear, dashboardMonth]
   );
-  const nextMonthForecast = useMemo(() => {
-    if (forecasts.length === 0) return null;
-    const sample = forecasts.slice(-30);
-    const total = sample.reduce((sum, item) => sum + item.predictedOccupancy, 0);
-    return Math.round(total / sample.length);
-  }, [forecasts]);
-  const latestDataMonth = useMemo(() => {
-    if (!latestForecast) return 'Latest Month';
-    return new Date(latestForecast.date).toLocaleString('default', { month: 'long' });
-  }, [latestForecast]);
-  const nextForecastMonth = useMemo(() => {
-    if (!latestForecast) return 'Next Month';
-    const date = new Date(latestForecast.date);
-    date.setMonth(date.getMonth() + 1);
-    return date.toLocaleString('default', { month: 'long' });
-  }, [latestForecast]);
   const bestModelUsed = useMemo(() => {
     const completed = jobs.filter((job) => job.status === 'completed');
     if (completed.length === 0) return 'N/A';
@@ -567,7 +514,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     ];
   }, [
     apiReflectedEndpoint,
-    currentDateTime,
     currentMonthHolidayCount,
     endpoints,
     inflationRateInput,
