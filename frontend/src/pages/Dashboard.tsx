@@ -6,6 +6,8 @@ import { PerformanceChart } from '../components/PerformanceChart';
 import { RetrainingStats } from '../components/RetrainingStats';
 import { DataExport } from '../components/DataExport';
 import { TouristForecastTrendChart } from '../components/TouristForecastTrendChart';
+import { MonthlyTouristArrivalsDataChart } from '../components/MonthlyTouristArrivalsDataChart';
+import { TouristParametersBarChart } from '../components/TouristParametersBarChart';
 import { 
   getModelMetrics, 
   getDriftAlerts, 
@@ -531,8 +533,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const tabs: Array<{ id: string; label: string; icon: DashboardIconName }> = [
     { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
     { id: 'metrics', label: 'Metrics', icon: 'metrics' },
-    { id: 'retraining', label: 'Models & Parameters', icon: 'retraining' },
+    { id: 'retraining', label: 'Model Parameters', icon: 'retraining' },
   ];
+
+  const touristParameterBarData = useMemo(
+    () => [
+      { label: 'Peak Season', value: isPeakSeason },
+      { label: 'Holiday Count', value: currentMonthHolidayCount },
+      { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC).toFixed(1)) },
+      { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC).toFixed(1)) },
+      { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm).toFixed(1)) },
+      { label: 'Inflation Rate (%)', value: Number(inflationRateInput) || 0 },
+      { label: 'Is December', value: isDecember },
+    ],
+    [
+      currentMonthHolidayCount,
+      inflationRateInput,
+      isDecember,
+      isPeakSeason,
+      monthHighTempC,
+      monthLowTempC,
+      monthPrecipitationCm,
+    ]
+  );
 
   const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [...tabs];
   const activeSectionLabel = activeTab === 'about'
@@ -596,7 +619,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <span className="w-6 flex items-center justify-center">
                   <DashboardIcon name={item.icon} className="h-5 w-5" />
                 </span>
-                <span className={`font-semibold whitespace-nowrap ${item.id === 'retraining' ? 'text-sm lg:text-base' : 'text-lg'}`}>
+                <span className="font-semibold whitespace-nowrap text-lg">
                   {item.label}
                 </span>
               </button>
@@ -779,7 +802,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           <div className="px-4 md:px-8 xl:px-10 py-8">
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
-              {activeTab === 'overview' && (
+              {(activeTab === 'overview' || activeTab === 'metrics') && (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <select
                     value={dashboardMonth}
@@ -864,6 +887,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Metrics Tab */}
             {activeTab === 'metrics' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <MonthlyTouristArrivalsDataChart forecasts={forecasts} year={dashboardYear} />
+                <TouristForecastTrendChart
+                  forecasts={forecasts}
+                  predictedMonths={predictedMonthsToShow}
+                  onPredictedMonthsChange={setPredictedMonthsToShow}
+                />
+                <TouristParametersBarChart parameters={touristParameterBarData} />
                 {latestMetric && <PerformanceChart latest={latestMetric} />}
                 {metrics.length > 0 && <MetricsChart metrics={metrics} />}
               </div>
@@ -872,30 +902,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Retraining Tab */}
             {activeTab === 'retraining' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <div>
-                  <h2 className="text-2xl font-bold mb-4">Model Controls</h2>
-                </div>
-                <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
-                  <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                    Inflation Rate Input (%)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={inflationRateInput}
-                    onChange={(e) => setInflationRateInput(e.target.value)}
-                    className={`mt-2 w-full md:w-64 p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  />
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                  <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
+                  <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
+                    <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      Inflation Rate Input (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={inflationRateInput}
+                      onChange={(e) => setInflationRateInput(e.target.value)}
+                      className={`mt-2 w-full md:w-64 p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                    />
+                  </div>
+
+                  <RetrainingStats jobs={jobs} />
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mt-6">
+                    {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
+                  </div>
                 </div>
 
-                <RetrainingStats jobs={jobs} />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
-                </div>
-
-                <div>
-                  <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                  <h2 className="text-2xl font-bold mb-4">Parameters</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                     {touristTrendParameters.map((parameter) => {
                       return (
@@ -997,7 +1027,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   )}
                 </div>
 
-                <div>
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
                   <h2 className="text-2xl font-bold mb-4">Export Data</h2>
                   <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
                 </div>
