@@ -448,8 +448,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return 'N/A';
   }, [dataQuality]);
   const currentMonthHolidayCount = useMemo(() => {
-    const year = currentDateTime.getFullYear();
-    const month = currentDateTime.getMonth();
+    const year = dashboardYear;
+    const month = dashboardMonth;
     const totalDays = daysInMonth(year, month);
     let holidayCount = 0;
 
@@ -460,34 +460,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
 
     return holidayCount;
-  }, [currentDateTime]);
-  const currentMonth = currentDateTime.getMonth();
+  }, [dashboardMonth, dashboardYear]);
 
   // Weather data fetched from Open-Meteo API (falls back to climatological averages)
   const [weatherData, setWeatherData] = useState<MonthlyWeather | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   useEffect(() => {
     setWeatherLoading(true);
-    fetchMonthlyWeather(currentDateTime.getFullYear(), currentMonth)
+    fetchMonthlyWeather(dashboardYear, dashboardMonth)
       .then((data) => setWeatherData(data))
       .finally(() => setWeatherLoading(false));
-  }, [currentMonth, currentDateTime.getFullYear()]);
+  }, [dashboardMonth, dashboardYear]);
 
   // Fallback arrays used while loading or if API is unavailable
   const FALLBACK_HIGH = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
   const FALLBACK_LOW  = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
   const FALLBACK_PREC = [7.2,  6.8,  5.9,  4.8,  9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
 
-  const monthHighTempC       = weatherData?.avgHighTemp        ?? FALLBACK_HIGH[currentMonth];
-  const monthLowTempC        = weatherData?.avgLowTemp         ?? FALLBACK_LOW[currentMonth];
-  const monthPrecipitationCm = weatherData?.totalPrecipitation ?? FALLBACK_PREC[currentMonth];
+  const monthHighTempC       = weatherData?.avgHighTemp        ?? FALLBACK_HIGH[dashboardMonth];
+  const monthLowTempC        = weatherData?.avgLowTemp         ?? FALLBACK_LOW[dashboardMonth];
+  const monthPrecipitationCm = weatherData?.totalPrecipitation ?? FALLBACK_PREC[dashboardMonth];
   const weatherSource        = weatherData?.source ?? 'fallback';
   const isPeakSeason = useMemo(() => {
     const peakSeasonMonths = [2, 3, 4, 11];
-    return peakSeasonMonths.includes(currentMonth) ? 1 : 0;
-  }, [currentMonth]);
-  const isDecember = useMemo(() => (currentMonth === 11 ? 1 : 0), [currentMonth]);
-  const isLockdown = 0;
+    return peakSeasonMonths.includes(dashboardMonth) ? 1 : 0;
+  }, [dashboardMonth]);
+  const isDecember = useMemo(() => (dashboardMonth === 11 ? 1 : 0), [dashboardMonth]);
+  const isLockdown: number = 0;
   const connectedEndpoint = useMemo(
     () => endpoints.find((endpoint) => endpoint.status === 'active') ?? endpoints[0],
     [endpoints]
@@ -497,7 +496,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     [connectedEndpoint, endpoints]
   );
   const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
-    const currentMonthLabel = currentDateTime.toLocaleString('default', { month: 'long' });
     const reflectionLabel = apiReflectedEndpoint
       ? apiReflectedEndpoint.status === 'active'
         ? `Connected via ${apiReflectedEndpoint.name}`
@@ -529,7 +527,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           : weatherSource === 'api'
           ? 'Live data via Open-Meteo API'
           : 'Using climatological average (API unavailable)',
-        note: 'Average daily high temperature for the current month in Celsius.',
+        note: `Average daily high temperature for ${dashboardMonthLabel} in Celsius.`,
       },
       {
         label: 'Average Low Temperature',
@@ -541,7 +539,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           : weatherSource === 'api'
           ? 'Live data via Open-Meteo API'
           : 'Using climatological average (API unavailable)',
-        note: 'Average daily low temperature for the current month in Celsius.',
+        note: `Average daily low temperature for ${dashboardMonthLabel} in Celsius.`,
       },
       {
         label: 'Precipitation',
@@ -553,7 +551,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           : weatherSource === 'api'
           ? 'Live data via Open-Meteo API'
           : 'Using climatological average (API unavailable)',
-        note: 'Total precipitation for the current month in centimetres.',
+        note: `Total precipitation for ${dashboardMonthLabel} in centimetres.`,
       },
       {
         label: 'Inflation Rate',
@@ -592,6 +590,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
+    dashboardMonthLabel,
     weatherLoading,
     weatherSource,
   ]);
@@ -879,23 +878,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                   <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
-                    <p className="text-3xl font-bold text-blue-500">
+                    <p className="text-3xl font-bold text-sky-500">
                       {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Submission Rate</p>
-                    <p className="text-3xl font-bold text-orange-500">{submissionRate}</p>
+                    <p className="text-3xl font-bold text-sky-500">{submissionRate}</p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
-                    <p className="text-3xl font-bold text-green-500">
+                    <p className="text-3xl font-bold text-sky-500">
                       {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
                   <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
-                    <p className="text-xl font-bold text-purple-500 break-all">{bestModelUsed}</p>
+                    <p className="text-xl font-bold text-sky-500 break-all">{bestModelUsed}</p>
                   </div>
                 </div>
 
@@ -906,23 +905,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 />
 
                 <div className="grid grid-cols-1 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`font-semibold mb-3 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>Tourist Trends Data Parameters</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className={`${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+                    <p className="font-semibold mb-3">Tourist Trends Data Parameters</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {touristTrendParameters.map((parameter) => {
                         return (
                           <div
                             key={parameter.label}
-                            className={`text-left px-3 py-2 rounded border text-sm transition ${
+                            className={`rounded-lg shadow p-4 border-l-4 border-sky-500 transition ${
                               isDarkMode
-                                ? 'bg-slate-900 border-slate-700 text-gray-100'
-                                : 'bg-gray-50 border-gray-200 text-gray-700'
+                                ? 'bg-slate-900 text-gray-100'
+                                : 'bg-white text-gray-700'
                             }`}
                           >
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="font-medium">{parameter.label}</p>
-                              <p className={`text-sm font-semibold ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>{parameter.value}</p>
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="font-medium text-sm">{parameter.label}</p>
+                              <p className="text-sm font-semibold text-sky-500">{parameter.value}</p>
                             </div>
+                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {parameter.statusLabel}
+                            </p>
+                            {parameter.note && (
+                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                                {parameter.note}
+                              </p>
+                            )}
                           </div>
                         );
                       })}

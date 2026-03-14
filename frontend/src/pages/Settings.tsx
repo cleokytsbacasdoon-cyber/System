@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useToast } from '../contexts/ToastContext';
+import { useDarkMode } from '../contexts/DarkModeContext';
 
 interface Settings {
   driftThreshold: number;
@@ -9,8 +10,14 @@ interface Settings {
   metricsRetention: number;
 }
 
-export const SettingsPage: React.FC = () => {
+interface SettingsPageProps {
+  onClose?: () => void;
+  asModal?: boolean;
+}
+
+export const SettingsPage: React.FC<SettingsPageProps> = ({ onClose, asModal = false }) => {
   const { addToast } = useToast();
+  const { isDarkMode } = useDarkMode();
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('appSettings');
     return saved ? JSON.parse(saved) : {
@@ -53,18 +60,32 @@ export const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-2xl mx-auto px-4">
-        <h1 className="text-4xl font-bold text-dark mb-8">Settings</h1>
+    <div className={`${asModal ? '' : `min-h-screen py-8 ${isDarkMode ? 'bg-slate-950' : 'bg-gray-50'}`} ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+      <div className={`${asModal ? 'w-full' : 'max-w-2xl mx-auto px-4'}`}>
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h1 className={`text-4xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Settings</h1>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition ${
+                isDarkMode
+                  ? 'bg-slate-900 border-slate-700 text-white hover:bg-slate-800'
+                  : 'bg-white border-gray-300 text-black hover:bg-gray-100'
+              }`}
+            >
+              Close
+            </button>
+          )}
+        </div>
 
-        <div className="bg-white rounded-lg shadow-md p-8 space-y-6">
+        <div className={`rounded-lg shadow-md p-8 space-y-6 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'}`}>
           {/* Drift Detection Settings */}
-          <div className="border-b pb-6">
-            <h2 className="text-2xl font-semibold text-dark mb-4">Drift Detection</h2>
+          <div className={`border-b pb-6 ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+            <h2 className={`text-2xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Drift Detection</h2>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                   Drift Threshold (%): {settings.driftThreshold}%
                 </label>
                 <input
@@ -73,15 +94,15 @@ export const SettingsPage: React.FC = () => {
                   max="50"
                   value={settings.driftThreshold}
                   onChange={(e) => handleChange('driftThreshold', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${isDarkMode ? 'bg-slate-700' : 'bg-gray-200'}`}
                 />
-                <p className="text-xs text-gray-600 mt-1">
+                <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                   Alert will trigger when value changes by this percentage
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                   <input
                     type="checkbox"
                     checked={settings.alertSoundEnabled}
@@ -93,7 +114,7 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                   <input
                     type="checkbox"
                     checked={settings.autoResolveAlerts}
@@ -107,11 +128,11 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           {/* Dashboard Settings */}
-          <div className="border-b pb-6">
-            <h2 className="text-2xl font-semibold text-dark mb-4">Dashboard</h2>
+          <div className={`border-b pb-6 ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+            <h2 className={`text-2xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Dashboard</h2>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                 Auto-refresh interval (seconds): {settings.refreshInterval}s
               </label>
               <input
@@ -121,9 +142,9 @@ export const SettingsPage: React.FC = () => {
                 step="10"
                 value={settings.refreshInterval}
                 onChange={(e) => handleChange('refreshInterval', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${isDarkMode ? 'bg-slate-700' : 'bg-gray-200'}`}
               />
-              <p className="text-xs text-gray-600 mt-1">
+              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                 Dashboard will refresh every {settings.refreshInterval} seconds
               </p>
             </div>
@@ -131,10 +152,10 @@ export const SettingsPage: React.FC = () => {
 
           {/* Data Settings */}
           <div className="pb-6">
-            <h2 className="text-2xl font-semibold text-dark mb-4">Data Management</h2>
+            <h2 className={`text-2xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Data Management</h2>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                 Keep metrics for last: {settings.metricsRetention} records
               </label>
               <input
@@ -144,9 +165,9 @@ export const SettingsPage: React.FC = () => {
                 step="100"
                 value={settings.metricsRetention}
                 onChange={(e) => handleChange('metricsRetention', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${isDarkMode ? 'bg-slate-700' : 'bg-gray-200'}`}
               />
-              <p className="text-xs text-gray-600 mt-1">
+              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                 Older metrics will be archived
               </p>
             </div>
@@ -160,6 +181,8 @@ export const SettingsPage: React.FC = () => {
               className={`flex-1 px-6 py-2 rounded font-medium transition ${
                 hasChanges
                   ? 'bg-primary text-white hover:bg-blue-600'
+                  : isDarkMode
+                  ? 'bg-slate-700 text-gray-300 cursor-not-allowed'
                   : 'bg-gray-300 text-gray-600 cursor-not-allowed'
               }`}
             >
@@ -167,16 +190,20 @@ export const SettingsPage: React.FC = () => {
             </button>
             <button
               onClick={handleReset}
-              className="flex-1 px-6 py-2 bg-gray-200 text-gray-800 rounded font-medium hover:bg-gray-300 transition"
+              className={`flex-1 px-6 py-2 rounded font-medium transition ${
+                isDarkMode
+                  ? 'bg-slate-700 text-white hover:bg-slate-600'
+                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+              }`}
             >
               Reset to Defaults
             </button>
           </div>
         </div>
 
-        <div className="mt-8 bg-blue-50 rounded-lg p-4 border border-blue-200">
-          <h3 className="font-semibold text-blue-900 mb-2">💡 Tip</h3>
-          <p className="text-blue-800 text-sm">
+        <div className={`mt-8 rounded-lg p-4 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-sky-50 border-sky-200'}`}>
+          <h3 className={`font-semibold mb-2 ${isDarkMode ? 'text-sky-300' : 'text-sky-900'}`}>Tip</h3>
+          <p className={`text-sm ${isDarkMode ? 'text-sky-100' : 'text-sky-800'}`}>
             Settings are saved locally in your browser. They will persist even after closing and reopening the dashboard.
           </p>
         </div>
