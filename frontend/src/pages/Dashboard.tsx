@@ -599,13 +599,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
     { id: 'metrics', label: 'Metrics', icon: 'metrics' },
     { id: 'alerts', label: 'Alerts', icon: 'alerts' },
-    { id: 'retraining', label: 'Retraining', icon: 'retraining' },
-    { id: 'api', label: 'API', icon: 'api' },
+    { id: 'retraining', label: 'Models & Parameters', icon: 'retraining' },
   ];
 
   const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [
     ...tabs,
-    { id: 'export', label: 'Export', icon: 'export' },
     { id: 'about', label: 'About the System', icon: 'info' },
   ];
   const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
@@ -918,18 +916,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                 : 'bg-white text-gray-700'
                             }`}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <p className="font-medium text-sm">{parameter.label}</p>
-                              <p className="text-sm font-semibold text-sky-500">{parameter.value}</p>
-                            </div>
-                            <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              {parameter.statusLabel}
-                            </p>
-                            {parameter.note && (
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                                {parameter.note}
-                              </p>
-                            )}
+                            <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{parameter.label}</p>
+                            <p className="mt-2 text-xl font-bold text-sky-500">{parameter.value}</p>
                           </div>
                         );
                       })}
@@ -961,6 +949,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Retraining Tab */}
             {activeTab === 'retraining' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div>
+                  <h2 className="text-2xl font-bold mb-4">Model Controls</h2>
+                </div>
                 <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
                   <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                     Inflation Rate Input (%)
@@ -979,14 +970,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                   {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
                 </div>
-              </div>
-            )}
 
-            {/* API Tab */}
-            {activeTab === 'api' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div>
-                  <h2 className="text-2xl font-bold mb-4">Tourist Trends Data Parameters</h2>
+                  <h2 className="text-2xl font-bold mb-4">API Parameters</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                     {touristTrendParameters.map((parameter) => {
                       return (
@@ -1087,13 +1073,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     </p>
                   )}
                 </div>
-              </div>
-            )}
 
-            {/* EXPORT CONTEXT */}
-            {activeTab === 'export' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
+                <div>
+                  <h2 className="text-2xl font-bold mb-4">Export Data</h2>
+                  <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
+                </div>
               </div>
             )}
 
