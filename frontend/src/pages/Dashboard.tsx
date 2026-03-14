@@ -828,27 +828,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
             {/* Dashboard Tab */}
             {activeTab === 'overview' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
-                    <p className="text-3xl font-bold text-sky-500">
-                      {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Submission Rate</p>
-                    <p className="text-3xl font-bold text-sky-500">{submissionRate}</p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
-                    <p className="text-3xl font-bold text-sky-500">
-                      {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
-                    <p className="text-xl font-bold text-sky-500 break-all">{bestModelUsed}</p>
+              <div className="space-y-8">
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
+                      <p className="text-3xl font-bold text-sky-500">
+                        {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
+                      </p>
+                    </div>
+                    <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Submission Rate</p>
+                      <p className="text-3xl font-bold text-sky-500">{submissionRate}</p>
+                    </div>
+                    <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
+                      <p className="text-3xl font-bold text-sky-500">
+                        {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
+                      </p>
+                    </div>
+                    <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
+                      <p className="text-xl font-bold text-sky-500 break-all">{bestModelUsed}</p>
+                    </div>
                   </div>
                 </div>
 
@@ -858,7 +860,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   onPredictedMonthsChange={setPredictedMonthsToShow}
                 />
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <div className={`${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
                     <p className="text-xl md:text-2xl font-bold mb-3">Tourist Trends Data Parameters</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -880,7 +882,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     </div>
                   </div>
                 </div>
-
               </div>
             )}
 
@@ -901,8 +902,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
             {/* Retraining Tab */}
             {activeTab === 'retraining' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+              <div className="space-y-8">
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
                     <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
@@ -924,7 +925,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   </div>
                 </div>
 
-                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Parameters</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                     {touristTrendParameters.map((parameter) => {
@@ -1027,7 +1028,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   )}
                 </div>
 
-                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Export Data</h2>
                   <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
                 </div>
