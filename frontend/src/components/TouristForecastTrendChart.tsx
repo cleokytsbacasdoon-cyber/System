@@ -144,8 +144,8 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
       {
         label: 'Actual Tourists',
         data: chartSeries.actualData,
-        borderColor: '#F97316',
-        backgroundColor: 'rgba(249, 115, 22, 0.2)',
+        borderColor: '#2563EB',
+        backgroundColor: 'rgba(37, 99, 235, 0.2)',
         pointRadius: 4,
         pointHoverRadius: 6,
         tension: 0.35,
@@ -153,8 +153,8 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
       {
         label: 'Predicted Tourists',
         data: chartSeries.predictedData,
-        borderColor: '#2563EB',
-        backgroundColor: 'rgba(37, 99, 235, 0.15)',
+        borderColor: '#F97316',
+        backgroundColor: 'rgba(249, 115, 22, 0.15)',
         borderDash: [6, 6],
         pointRadius: 4,
         pointHoverRadius: 6,

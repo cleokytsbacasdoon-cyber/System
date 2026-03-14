@@ -37,6 +37,144 @@ interface TouristTrendParameter {
   note?: string;
 }
 
+type DashboardIconName =
+  | 'dashboard'
+  | 'metrics'
+  | 'alerts'
+  | 'retraining'
+  | 'api'
+  | 'export'
+  | 'info'
+  | 'notification'
+  | 'sun'
+  | 'moon'
+  | 'settings'
+  | 'refresh';
+
+interface DashboardIconProps {
+  name: DashboardIconName;
+  className?: string;
+}
+
+const DashboardIcon: React.FC<DashboardIconProps> = ({ name, className = 'h-5 w-5' }) => {
+  const baseProps = {
+    className,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.9,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+
+  switch (name) {
+    case 'dashboard':
+      return (
+        <svg {...baseProps}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M8 15v-3" />
+          <path d="M12 15V9" />
+          <path d="M16 15v-5" />
+        </svg>
+      );
+    case 'metrics':
+      return (
+        <svg {...baseProps}>
+          <path d="M3 19h18" />
+          <path d="M5 15l4-4 3 2 6-6" />
+          <path d="M18 7h2v2" />
+        </svg>
+      );
+    case 'alerts':
+      return (
+        <svg {...baseProps}>
+          <path d="M12 3L2.8 19h18.4L12 3z" />
+          <path d="M12 9v4" />
+          <path d="M12 16h.01" />
+        </svg>
+      );
+    case 'retraining':
+      return (
+        <svg {...baseProps}>
+          <path d="M3 12a9 9 0 0 1 15.3-6.3" />
+          <path d="M18 2.5v4h-4" />
+          <path d="M21 12a9 9 0 0 1-15.3 6.3" />
+          <path d="M6 21.5v-4h4" />
+        </svg>
+      );
+    case 'api':
+      return (
+        <svg {...baseProps}>
+          <path d="M8.5 8.5l7 7" />
+          <path d="M8.5 15.5l-2 2a3 3 0 1 1-4.2-4.2l2-2" />
+          <path d="M15.5 8.5l2-2a3 3 0 1 1 4.2 4.2l-2 2" />
+        </svg>
+      );
+    case 'export':
+      return (
+        <svg {...baseProps}>
+          <path d="M12 3v10" />
+          <path d="M8.5 9.5L12 13l3.5-3.5" />
+          <path d="M4 15.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5" />
+        </svg>
+      );
+    case 'info':
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 10v6" />
+          <path d="M12 7h.01" />
+        </svg>
+      );
+    case 'notification':
+      return (
+        <svg {...baseProps}>
+          <path d="M15 17H9" />
+          <path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z" />
+        </svg>
+      );
+    case 'sun':
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2.5V5" />
+          <path d="M12 19v2.5" />
+          <path d="M21.5 12H19" />
+          <path d="M5 12H2.5" />
+          <path d="M18.4 5.6l-1.8 1.8" />
+          <path d="M7.4 16.6l-1.8 1.8" />
+          <path d="M18.4 18.4l-1.8-1.8" />
+          <path d="M7.4 7.4L5.6 5.6" />
+        </svg>
+      );
+    case 'moon':
+      return (
+        <svg {...baseProps}>
+          <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 7 7 0 0 0 20 14.5z" />
+        </svg>
+      );
+    case 'settings':
+      return (
+        <svg {...baseProps}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.8 1.8 0 0 1-3.6 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.8 1.8 0 0 1 0-3.6h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a1.8 1.8 0 0 1 3.6 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a1.8 1.8 0 0 1 0 3.6h-.2a1 1 0 0 0-.9.6z" />
+        </svg>
+      );
+    case 'refresh':
+      return (
+        <svg {...baseProps}>
+          <path d="M20 5v5h-5" />
+          <path d="M4 19v-5h5" />
+          <path d="M20 10a8 8 0 0 0-13.7-5.7L5 5" />
+          <path d="M4 14a8 8 0 0 0 13.7 5.7L19 19" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const { addToast } = useToast();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
@@ -458,15 +596,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     weatherSource,
   ]);
 
-  const tabs = [
-    { id: 'overview', label: 'Dashboard', icon: '📊' },
-    { id: 'metrics', label: 'Metrics', icon: '📈' },
-    { id: 'alerts', label: 'Alerts', icon: '⚠️' },
-    { id: 'retraining', label: 'Retraining', icon: '🔄' },
-    { id: 'api', label: 'API', icon: '🔗' },
+  const tabs: Array<{ id: string; label: string; icon: DashboardIconName }> = [
+    { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
+    { id: 'metrics', label: 'Metrics', icon: 'metrics' },
+    { id: 'alerts', label: 'Alerts', icon: 'alerts' },
+    { id: 'retraining', label: 'Retraining', icon: 'retraining' },
+    { id: 'api', label: 'API', icon: 'api' },
   ];
 
-  const navigationItems = [...tabs, { id: 'export', label: 'Export', icon: '📥' }, { id: 'about', label: 'About the System', icon: 'ℹ️' }];
+  const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [
+    ...tabs,
+    { id: 'export', label: 'Export', icon: 'export' },
+    { id: 'about', label: 'About the System', icon: 'info' },
+  ];
   const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
   useEffect(() => {
@@ -519,11 +661,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   activeTab === item.id
                     ? 'bg-blue-600 text-white shadow'
                     : isDarkMode
-                    ? 'hover:bg-slate-800 text-gray-200'
-                    : 'hover:bg-gray-100 text-gray-700'
+                    ? 'hover:bg-slate-800 text-white'
+                    : 'hover:bg-gray-100 text-black'
                 }`}
               >
-                <span className="w-6 text-center text-lg font-semibold">{item.icon}</span>
+                <span className="w-6 flex items-center justify-center">
+                  <DashboardIcon name={item.icon} className="h-5 w-5" />
+                </span>
                 <span className="font-semibold text-lg">{item.label}</span>
               </button>
             ))}
@@ -570,15 +714,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 onClick={() => setIsNotificationOpen((prev) => !prev)}
                 title="Alert Notifications"
                 data-notification-trigger="true"
-                className={`relative p-3 text-xl rounded-lg transition border ${
+                className={`relative p-3 rounded-lg transition border flex items-center justify-center ${
                   unreadNotifications.length > 0
                     ? 'bg-red-500 border-red-400 text-white hover:bg-red-600'
                     : isDarkMode
-                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-black hover:bg-gray-100'
                 }`}
               >
-                🔔
+                <DashboardIcon name="notification" className="h-5 w-5" />
                 {unreadNotifications.length > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[1.2rem] h-5 px-1 rounded-full bg-red-700 text-white text-[10px] flex items-center justify-center">
                     {unreadNotifications.length}
@@ -589,35 +733,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <button
                 onClick={toggleDarkMode}
                 title={isDarkMode ? 'Light Mode' : 'Dark Mode'}
-                className={`p-3 rounded-lg transition text-xl border ${
+                className={`p-3 rounded-lg transition border flex items-center justify-center ${
                   isDarkMode
-                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-black hover:bg-gray-100'
                 }`}
               >
-                {isDarkMode ? '☀️' : '🌙'}
+                <DashboardIcon name={isDarkMode ? 'sun' : 'moon'} className="h-5 w-5" />
               </button>
               <button
                 onClick={onSettingsClick}
                 title="Settings"
-                className={`p-3 text-xl rounded-lg transition border ${
+                className={`p-3 rounded-lg transition border flex items-center justify-center ${
                   isDarkMode
-                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-black hover:bg-gray-100'
                 }`}
               >
-                ⚙️
+                <DashboardIcon name="settings" className="h-5 w-5" />
               </button>
               <button
                 onClick={() => loadData()}
                 title="Refresh Dashboard"
-                className={`p-3 text-xl rounded-lg transition border ${
+                className={`p-3 rounded-lg transition border flex items-center justify-center ${
                   isDarkMode
-                    ? 'bg-slate-800 border-slate-600 text-gray-100 hover:bg-slate-700'
-                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                    ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
+                    : 'bg-white border-gray-300 text-black hover:bg-gray-100'
                 }`}
               >
-                🔄
+                <DashboardIcon name="refresh" className="h-5 w-5" />
               </button>
             </div>
             <div className={`w-full ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
@@ -642,11 +786,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     activeTab === item.id
                       ? 'bg-blue-600 text-white'
                       : isDarkMode
-                      ? 'bg-slate-800 text-gray-200'
-                      : 'bg-gray-100 text-gray-700'
+                      ? 'bg-slate-800 text-white'
+                      : 'bg-gray-100 text-black'
                   }`}
                 >
-                  <span className="text-base leading-none">{item.icon}</span>
+                  <DashboardIcon name={item.icon} className="h-4 w-4" />
                   {item.label}
                 </button>
               ))}
@@ -659,33 +803,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   unreadNotifications.length > 0
                     ? 'bg-red-500 text-white'
                     : isDarkMode
-                    ? 'bg-slate-800 text-gray-100'
-                    : 'bg-gray-100 text-gray-700'
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-gray-100 text-black'
                 }`}
               >
-                🔔 Alerts
+                <span className="flex items-center justify-center gap-2">
+                  <DashboardIcon name="notification" className="h-4 w-4" />
+                  Alerts
+                </span>
               </button>
               <button
                 onClick={toggleDarkMode}
                 className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                  isDarkMode ? 'bg-slate-800 text-gray-100' : 'bg-gray-100 text-gray-700'
+                  isDarkMode ? 'bg-slate-800 text-white' : 'bg-gray-100 text-black'
                 }`}
               >
-                {isDarkMode ? '☀️ Light' : '🌙 Dark'}
+                <span className="flex items-center justify-center gap-2">
+                  <DashboardIcon name={isDarkMode ? 'sun' : 'moon'} className="h-4 w-4" />
+                  {isDarkMode ? 'Light' : 'Dark'}
+                </span>
               </button>
               <button
                 onClick={onSettingsClick}
                 className="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white"
               >
-                ⚙️ Settings
+                <span className="flex items-center justify-center gap-2">
+                  <DashboardIcon name="settings" className="h-4 w-4" />
+                  Settings
+                </span>
               </button>
               <button
                 onClick={() => loadData()}
                 className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                  isDarkMode ? 'bg-slate-800 text-gray-100' : 'bg-gray-100 text-gray-700'
+                  isDarkMode ? 'bg-slate-800 text-white' : 'bg-gray-100 text-black'
                 }`}
               >
-                🔄 Refresh
+                <span className="flex items-center justify-center gap-2">
+                  <DashboardIcon name="refresh" className="h-4 w-4" />
+                  Refresh
+                </span>
               </button>
             </div>
           </div>
@@ -721,23 +877,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {activeTab === 'overview' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-blue-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
                     <p className="text-3xl font-bold text-blue-500">
                       {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-orange-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Submission Rate</p>
                     <p className="text-3xl font-bold text-orange-500">{submissionRate}</p>
                   </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-green-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
                     <p className="text-3xl font-bold text-green-500">
                       {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
                     </p>
                   </div>
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
                     <p className="text-xl font-bold text-purple-500 break-all">{bestModelUsed}</p>
                   </div>
@@ -750,7 +906,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 />
 
                 <div className="grid grid-cols-1 gap-4">
-                  <div className={`rounded-lg shadow p-4 border-l-4 border-purple-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                  <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                     <p className={`font-semibold mb-3 ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>Tourist Trends Data Parameters</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {touristTrendParameters.map((parameter) => {
