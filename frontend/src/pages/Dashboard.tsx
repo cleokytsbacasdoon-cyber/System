@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { MetricsCard } from '../components/MetricsCard';
-import { DriftAlertCard } from '../components/DriftAlertCard';
 import { RetrainingJobCard } from '../components/RetrainingJobCard';
 import { MetricsChart } from '../components/MetricsChart';
 import { PerformanceChart } from '../components/PerformanceChart';
-import { DriftStats } from '../components/DriftStats';
 import { RetrainingStats } from '../components/RetrainingStats';
 import { DataExport } from '../components/DataExport';
 import { TouristForecastTrendChart } from '../components/TouristForecastTrendChart';
@@ -16,7 +14,6 @@ import {
   getAPIEndpoints,
   getDemandForecasts,
   getDataQuality,
-  resolveDriftAlert,
   startRetrainingJob,
   checkEndpointStatus 
 } from '../services/api';
@@ -286,16 +283,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
 
     return moveable[`${month}-${day}`] || holidayMap[`${month}-${day}`] || null;
-  };
-
-  const handleResolveAlert = async (alertId: string) => {
-    try {
-      await resolveDriftAlert(alertId);
-      setAlerts(alerts.map(a => a.id === alertId ? { ...a, resolved: true } : a));
-      addToast('Alert resolved', 'success');
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to resolve alert', 'error');
-    }
   };
 
   const handleStartRetraining = async (modelId: string) => {
@@ -598,15 +585,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const tabs: Array<{ id: string; label: string; icon: DashboardIconName }> = [
     { id: 'overview', label: 'Dashboard', icon: 'dashboard' },
     { id: 'metrics', label: 'Metrics', icon: 'metrics' },
-    { id: 'alerts', label: 'Alerts', icon: 'alerts' },
     { id: 'retraining', label: 'Models & Parameters', icon: 'retraining' },
   ];
 
-  const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [
-    ...tabs,
-    { id: 'about', label: 'About the System', icon: 'info' },
-  ];
-  const activeSectionLabel = navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
+  const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [...tabs];
+  const activeSectionLabel = activeTab === 'about'
+    ? 'About the System'
+    : navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
   useEffect(() => {
     if (!isNotificationOpen || latestThreeAlerts.length === 0) return;
@@ -665,7 +650,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <span className="w-6 flex items-center justify-center">
                   <DashboardIcon name={item.icon} className="h-5 w-5" />
                 </span>
-                <span className="font-semibold text-lg">{item.label}</span>
+                <span className={`font-semibold whitespace-nowrap ${item.id === 'retraining' ? 'text-sm lg:text-base' : 'text-lg'}`}>
+                  {item.label}
+                </span>
               </button>
             ))}
           </nav>
@@ -676,7 +663,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <div ref={notificationPanelRef} className={`absolute bottom-full left-0 mb-3 w-80 rounded-xl border shadow-xl z-20 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'}`}>
                   <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
                     <div className="flex items-center justify-between gap-3">
-                      <p className="font-semibold">Alert Notifications</p>
+                      <p className="font-semibold">Notification</p>
                       <button
                         onClick={() => setIsNotificationOpen(false)}
                         className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}
@@ -709,7 +696,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
               <button
                 onClick={() => setIsNotificationOpen((prev) => !prev)}
-                title="Alert Notifications"
+                title="Notification"
                 data-notification-trigger="true"
                 className={`relative p-3 rounded-lg transition border flex items-center justify-center ${
                   unreadNotifications.length > 0
@@ -750,15 +737,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <DashboardIcon name="settings" className="h-5 w-5" />
               </button>
               <button
-                onClick={() => loadData()}
-                title="Refresh Dashboard"
+                onClick={() => setActiveTab('about')}
+                title="About the System"
                 className={`p-3 rounded-lg transition border flex items-center justify-center ${
                   isDarkMode
                     ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
                     : 'bg-white border-gray-300 text-black hover:bg-gray-100'
                 }`}
               >
-                <DashboardIcon name="refresh" className="h-5 w-5" />
+                <DashboardIcon name="info" className="h-5 w-5" />
               </button>
             </div>
             <div className={`w-full ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
@@ -806,7 +793,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               >
                 <span className="flex items-center justify-center gap-2">
                   <DashboardIcon name="notification" className="h-4 w-4" />
-                  Alerts
+                  Notification
                 </span>
               </button>
               <button
@@ -830,14 +817,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 </span>
               </button>
               <button
-                onClick={() => loadData()}
+                onClick={() => setActiveTab('about')}
                 className={`px-3 py-2 rounded-lg text-sm font-medium ${
                   isDarkMode ? 'bg-slate-800 text-white' : 'bg-gray-100 text-black'
                 }`}
               >
                 <span className="flex items-center justify-center gap-2">
-                  <DashboardIcon name="refresh" className="h-4 w-4" />
-                  Refresh
+                  <DashboardIcon name="info" className="h-4 w-4" />
+                  About
                 </span>
               </button>
             </div>
@@ -904,7 +891,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
                 <div className="grid grid-cols-1 gap-4">
                   <div className={`${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-                    <p className="font-semibold mb-3">Tourist Trends Data Parameters</p>
+                    <p className="text-xl md:text-2xl font-bold mb-3">Tourist Trends Data Parameters</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {touristTrendParameters.map((parameter) => {
                         return (
@@ -933,16 +920,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
                 {latestMetric && <PerformanceChart latest={latestMetric} />}
                 {metrics.length > 0 && <MetricsChart metrics={metrics} />}
-              </div>
-            )}
-
-            {/* Alerts Tab */}
-            {activeTab === 'alerts' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <DriftStats alerts={alerts} />
-                <div className="space-y-4">
-                  {alerts.length > 0 ? alerts.map(alert => <DriftAlertCard key={alert.id} alert={alert} onResolve={handleResolveAlert} />) : <p>No alerts</p>}
-                </div>
               </div>
             )}
 
