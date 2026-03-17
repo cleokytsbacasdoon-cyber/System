@@ -63,6 +63,14 @@ const mapModelVersion = (row) => ({
   status: row.status,
 });
 
+const mapMlModel = (row) => ({
+  id: row.id,
+  name: row.name,
+  algorithm: row.algorithm,
+  status: row.status,
+  createdAt: row.created_at,
+});
+
 const mapDataQuality = (row) => ({
   id: row.id,
   completeness: Number(row.completeness),
@@ -86,6 +94,24 @@ const mapFeatureImportance = (row) => ({
   name: row.name,
   importance: Number(row.importance),
   category: row.category,
+});
+
+const mapMonthlyTourismDataset = (row) => ({
+  id: row.id,
+  year: Number(row.year),
+  month: Number(row.month),
+  arrivals: Number(row.arrivals),
+  avgHighTempC: row.avg_high_temp_c !== null ? Number(row.avg_high_temp_c) : null,
+  avgLowTempC: row.avg_low_temp_c !== null ? Number(row.avg_low_temp_c) : null,
+  precipitationCm: row.precipitation_cm !== null ? Number(row.precipitation_cm) : null,
+  inflationRate: row.inflation_rate !== null ? Number(row.inflation_rate) : null,
+  isPeakSeason: row.is_peak_season,
+  isDecember: row.is_december,
+  isLockdown: row.is_lockdown,
+  philippineHolidayCount: row.philippine_holiday_count,
+  top10MarketHolidays: row.top_10_market_holidays,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
@@ -212,6 +238,15 @@ app.get('/api/models/versions', async (_req, res, next) => {
   }
 });
 
+app.get('/api/models', async (_req, res, next) => {
+  try {
+    const result = await query('SELECT * FROM ml_models ORDER BY created_at ASC');
+    res.json(result.rows.map(mapMlModel));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/models/versions/:id/deploy', async (req, res, next) => {
   try {
     await query("UPDATE model_versions SET status = 'archived'");
@@ -287,6 +322,111 @@ app.get('/api/forecasts/insights', async (_req, res, next) => {
       featureDrift: driftObject,
       sampleForecasts: sampleForecasts.rows.map(mapDemandForecast),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/datasets/tourism/monthly', async (req, res, next) => {
+  try {
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+
+    if (year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) {
+      return res.status(400).json({ error: 'year must be an integer between 2000 and 2100' });
+    }
+
+    if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+      return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
+    }
+
+    let result;
+    if (year !== undefined && month !== undefined) {
+      result = await query(
+        'SELECT * FROM monthly_tourism_dataset WHERE year = $1 AND month = $2 ORDER BY year, month',
+        [year, month]
+      );
+    } else if (year !== undefined) {
+      result = await query('SELECT * FROM monthly_tourism_dataset WHERE year = $1 ORDER BY year, month', [year]);
+    } else {
+      result = await query('SELECT * FROM monthly_tourism_dataset ORDER BY year, month');
+    }
+
+    res.json(result.rows.map(mapMonthlyTourismDataset));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
+  try {
+    const {
+      year,
+      month,
+      arrivals,
+      avgHighTempC,
+      avgLowTempC,
+      precipitationCm,
+      inflationRate,
+      isPeakSeason,
+      isDecember,
+      isLockdown,
+      philippineHolidayCount,
+      top10MarketHolidays,
+    } = req.body;
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'year is required and must be between 2000 and 2100' });
+    }
+
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'month is required and must be between 1 and 12' });
+    }
+
+    if (!Number.isFinite(Number(arrivals))) {
+      return res.status(400).json({ error: 'arrivals is required and must be numeric' });
+    }
+
+    const result = await query(
+      `INSERT INTO monthly_tourism_dataset (
+        year, month, arrivals, avg_high_temp_c, avg_low_temp_c, precipitation_cm,
+        inflation_rate, is_peak_season, is_december, is_lockdown,
+        philippine_holiday_count, top_10_market_holidays, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10,
+        $11, $12, NOW()
+      )
+      ON CONFLICT (year, month) DO UPDATE SET
+        arrivals = EXCLUDED.arrivals,
+        avg_high_temp_c = EXCLUDED.avg_high_temp_c,
+        avg_low_temp_c = EXCLUDED.avg_low_temp_c,
+        precipitation_cm = EXCLUDED.precipitation_cm,
+        inflation_rate = EXCLUDED.inflation_rate,
+        is_peak_season = EXCLUDED.is_peak_season,
+        is_december = EXCLUDED.is_december,
+        is_lockdown = EXCLUDED.is_lockdown,
+        philippine_holiday_count = EXCLUDED.philippine_holiday_count,
+        top_10_market_holidays = EXCLUDED.top_10_market_holidays,
+        updated_at = NOW()
+      RETURNING *`,
+      [
+        year,
+        month,
+        Number(arrivals),
+        avgHighTempC ?? null,
+        avgLowTempC ?? null,
+        precipitationCm ?? null,
+        inflationRate ?? null,
+        isPeakSeason ?? null,
+        isDecember ?? null,
+        isLockdown ?? null,
+        philippineHolidayCount ?? null,
+        top10MarketHolidays ?? null,
+      ]
+    );
+
+    res.status(201).json(mapMonthlyTourismDataset(result.rows[0]));
   } catch (error) {
     next(error);
   }

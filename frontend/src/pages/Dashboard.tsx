@@ -400,6 +400,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }, completed[0]);
     return best.modelId;
   }, [jobs]);
+  const uniqueModelIds = useMemo(() => {
+    const unique = Array.from(new Set(jobs.map((job) => job.modelId))).filter(Boolean);
+    return unique.sort();
+  }, [jobs]);
   const submissionRate = useMemo(() => {
     if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
     return 'N/A';
@@ -940,6 +944,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
               <div className="space-y-8">
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
+                  <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Configured Models</p>
+                    <p className="mt-1 text-2xl font-bold text-sky-500">{uniqueModelIds.length}</p>
+                    <p className={`mt-1 text-sm break-all ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      {uniqueModelIds.length > 0 ? uniqueModelIds.join(', ') : 'No models loaded yet'}
+                    </p>
+                  </div>
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
                     <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
                       Inflation Rate Input (%)

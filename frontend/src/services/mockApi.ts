@@ -19,7 +19,7 @@ const getStaticPhilippineHolidays = (year: number): PhilippineHoliday[] => {
   return holidays;
 };
 
-const ALERT_MODEL_ID = 'tourism-forecast-v1';
+const ALERT_MODEL_ID = 'model-1';
 
 const createAlert = (
   partial: Omit<DemandAlert, 'id' | 'modelId'>,
@@ -142,7 +142,7 @@ const generateSampleMetrics = (): ForecastMetrics[] => {
 const generateSampleJobs = (): RetrainingJob[] => [
   {
     id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
+    modelId: 'model-1',
     status: 'completed',
     startTime: new Date(Date.now() - 7200000).toISOString(),
     endTime: new Date(Date.now() - 3600000).toISOString(),
@@ -150,15 +150,23 @@ const generateSampleJobs = (): RetrainingJob[] => [
   },
   {
     id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
+    modelId: 'model-2',
     status: 'running',
     startTime: new Date(Date.now() - 1800000).toISOString(),
   },
   {
     id: uuidv4(),
-    modelId: 'tourism-forecast-v1',
+    modelId: 'model-3',
     status: 'pending',
     startTime: new Date().toISOString(),
+  },
+  {
+    id: uuidv4(),
+    modelId: 'model-4',
+    status: 'completed',
+    startTime: new Date(Date.now() - 10800000).toISOString(),
+    endTime: new Date(Date.now() - 9000000).toISOString(),
+    accuracy: 0.91,
   },
 ];
 
@@ -192,7 +200,7 @@ const generateSampleEndpoints = (): APIEndpoint[] => [
 const generateSampleModelVersions = (): ModelVersion[] => [
   {
     id: uuidv4(),
-    version: 'v1.2.3',
+    version: 'model-1-v1.2.3',
     deployDate: new Date(Date.now() - 30 * 86400000).toISOString(),
     accuracy: 0.92,
     precision: 0.90,
@@ -201,7 +209,7 @@ const generateSampleModelVersions = (): ModelVersion[] => [
   },
   {
     id: uuidv4(),
-    version: 'v1.3.0',
+    version: 'model-2-v1.3.0',
     deployDate: new Date(Date.now() - 14 * 86400000).toISOString(),
     accuracy: 0.94,
     precision: 0.93,
@@ -210,8 +218,17 @@ const generateSampleModelVersions = (): ModelVersion[] => [
   },
   {
     id: uuidv4(),
-    version: 'v1.3.5',
+    version: 'model-3-v1.3.5',
     deployDate: new Date(Date.now() - 7 * 86400000).toISOString(),
+    accuracy: 0.95,
+    precision: 0.94,
+    recall: 0.95,
+    status: 'archived',
+  },
+  {
+    id: uuidv4(),
+    version: 'model-4-v1.4.1',
+    deployDate: new Date(Date.now() - 3 * 86400000).toISOString(),
     accuracy: 0.96,
     precision: 0.95,
     recall: 0.96,
