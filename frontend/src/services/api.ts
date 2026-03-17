@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord } from '../types';
 import { mockApi } from './mockApi';
 
 // Backend-first by default. Set VITE_USE_MOCK_API=true to force local mock mode.
@@ -113,6 +113,14 @@ export const getMonthlyTourismDataset = async (
 ): Promise<MonthlyTourismDatasetRecord[]> => {
   if (USE_MOCK_API) return mockApi.getMonthlyTourismDataset(params);
   const response = await apiClient.get('/datasets/tourism/monthly', { params });
+  return response.data;
+};
+
+export const getTop10MarketHolidays = async (
+  params?: { year?: number; month?: number }
+): Promise<Top10MarketHolidayRecord[]> => {
+  if (USE_MOCK_API) return mockApi.getTop10MarketHolidays(params);
+  const response = await apiClient.get('/datasets/tourism/top10-market-holidays', { params });
   return response.data;
 };
 

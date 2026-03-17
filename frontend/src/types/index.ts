@@ -102,6 +102,14 @@ export interface MonthlyTourismDatasetRecord {
   updatedAt: string;
 }
 
+export interface Top10MarketHolidayRecord {
+  year: number;
+  month: number;
+  rank: number;
+  country: string;
+  holidayCount: number;
+}
+
 export interface ForecastInsights {
   topFeatures: FeatureImportance[];
   featureDrift: { [key: string]: number };

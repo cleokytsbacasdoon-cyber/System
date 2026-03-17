@@ -16,13 +16,13 @@ import {
   getDemandForecasts,
   getDataQuality,
   getMonthlyTourismDataset,
+  getTop10MarketHolidays,
   startRetrainingJob,
-  checkEndpointStatus,
   getPhilippineHolidays,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
+import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -147,11 +147,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
   const [monthlyTourismData, setMonthlyTourismData] = useState<MonthlyTourismDatasetRecord[]>([]);
+  const [top10MarketHolidayData, setTop10MarketHolidayData] = useState<Top10MarketHolidayRecord[]>([]);
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [refreshInterval, setRefreshInterval] = useState(30);
-  const [predictedMonthsToShow, setPredictedMonthsToShow] = useState<3 | 6 | 12>(3);
   const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | null>(null);
@@ -170,14 +169,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);
 
   useEffect(() => {
-    const saved = localStorage.getItem('appSettings');
-    if (saved) {
-      const settings = JSON.parse(saved);
-      setRefreshInterval(settings.refreshInterval);
-    }
-  }, []);
-
-  useEffect(() => {
     const clockTimer = setInterval(() => {
       setCurrentDateTime(new Date());
     }, 1000);
@@ -188,21 +179,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [metricsData, alertsData, jobsData, endpointsData, forecastsData, qualityData] = await Promise.all([
+      const [metricsData, alertsData, jobsData, endpointsData, forecastsData, qualityData, monthlyTourismDataset, top10MarketHolidayDataset] = await Promise.all([
         getModelMetrics(),
         getDriftAlerts(),
         getRetrainingJobs(),
         getAPIEndpoints(),
         getDemandForecasts(),
         getDataQuality(),
+        getMonthlyTourismDataset(),
+        getTop10MarketHolidays(),
       ]);
-      const monthlyTourismDataset = await getMonthlyTourismDataset();
       setMetrics(metricsData);
       setAlerts(alertsData);
       setJobs(jobsData);
       setEndpoints(endpointsData);
       setForecasts(forecastsData);
       setMonthlyTourismData(monthlyTourismDataset);
+      setTop10MarketHolidayData(top10MarketHolidayDataset);
       setDataQuality(qualityData);
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
@@ -213,11 +206,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => {
+
+    const handleWindowFocus = () => {
       loadData();
-    }, refreshInterval * 1000);
-    return () => clearInterval(interval);
-  }, [loadData, refreshInterval]);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadData]);
 
   const getPHHoliday = (day: number, month: number, year: number) => {
     const holidayMap: { [key: string]: string } = {
@@ -268,27 +275,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
   };
 
-  const handleCheckEndpoint = async (endpointId: string, options?: { silentSuccess?: boolean }) => {
-    try {
-      const updatedEndpoint = await checkEndpointStatus(endpointId);
-      setEndpoints(prev => prev.map(e => e.id === endpointId ? updatedEndpoint : e));
-      if (!options?.silentSuccess) {
-        addToast('Endpoint checked', 'success');
-      }
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to check endpoint', 'error');
-    }
-  };
-
-  const handleApiParameterAction = async (parameter: string, endpointId?: string) => {
+  const handleApiParameterAction = (parameter: string) => {
     setSelectedApiParameter(parameter);
-    if (!endpointId) {
-      addToast(`No endpoint mapped for ${parameter}`, 'error');
-      return;
-    }
-
-    await handleCheckEndpoint(endpointId, { silentSuccess: true });
-    addToast(`${parameter} checked via endpoint monitor`, 'success');
+    addToast(`Showing details for ${parameter}`, 'success');
   };
 
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
@@ -359,7 +348,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       .map((row) => ({
         id: `monthly-${row.year}-${row.month}`,
         actualOccupancy: row.arrivals,
-        predictedOccupancy: row.arrivals,
+        predictedOccupancy: 0,
         error: 0,
         date: new Date(row.year, row.month - 1, 1).toISOString(),
         location: 'Tourism Dataset',
@@ -367,28 +356,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       }));
   }, [forecasts, monthlyTourismData]);
 
-  const monthlyForecastMap = useMemo(() => {
+  const monthlyTouristTotals = useMemo(() => {
     if (monthlyTourismData.length > 0) {
-      return monthlyTourismData.reduce<Record<string, { actualTotal: number; predictedTotal: number }>>((acc, item) => {
+      return monthlyTourismData.reduce<Record<string, { total: number }>>((acc, item) => {
         const key = `${item.year}-${item.month - 1}`;
         acc[key] = {
-          actualTotal: item.arrivals,
-          predictedTotal: item.arrivals,
+          total: item.arrivals,
         };
         return acc;
       }, {});
     }
 
-    return forecasts.reduce<Record<string, { actualTotal: number; predictedTotal: number }>>((acc, item) => {
+    return forecasts.reduce<Record<string, { total: number }>>((acc, item) => {
       const date = new Date(item.date);
       const key = `${date.getFullYear()}-${date.getMonth()}`;
 
       if (!acc[key]) {
-        acc[key] = { actualTotal: 0, predictedTotal: 0 };
+        acc[key] = { total: 0 };
       }
 
-      acc[key].actualTotal += item.actualOccupancy;
-      acc[key].predictedTotal += item.predictedOccupancy;
+      acc[key].total += item.actualOccupancy;
       return acc;
     }, {});
   }, [forecasts, monthlyTourismData]);
@@ -426,14 +413,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [selectedDashboardDate, latestForecast]);
 
   const selectedDashboardData = useMemo(() => {
-    return monthlyForecastMap[`${dashboardYear}-${dashboardMonth}`] ?? null;
-  }, [monthlyForecastMap, dashboardYear, dashboardMonth]);
+    return monthlyTouristTotals[`${dashboardYear}-${dashboardMonth}`] ?? null;
+  }, [monthlyTouristTotals, dashboardYear, dashboardMonth]);
 
   const selectedMonthlyTourismRecord = useMemo(() => {
     return monthlyTourismData.find(
       (row) => row.year === dashboardYear && row.month === dashboardMonth + 1
     ) || null;
   }, [dashboardMonth, dashboardYear, monthlyTourismData]);
+
+  const top10MarketHolidayForSelectedMonth = useMemo(() => {
+    return top10MarketHolidayData
+      .filter((row) => row.year === dashboardYear && row.month === dashboardMonth + 1)
+      .sort((a, b) => a.rank - b.rank);
+  }, [dashboardMonth, dashboardYear, top10MarketHolidayData]);
+
+  const peakSeasonMonthsForYear = useMemo(() => {
+    const monthNumbers = Array.from(
+      new Set(
+        monthlyTourismData
+          .filter((row) => row.year === dashboardYear && row.isPeakSeason)
+          .map((row) => row.month)
+      )
+    ).sort((a, b) => a - b);
+
+    return monthNumbers.map((monthNumber) => months[monthNumber - 1]);
+  }, [dashboardYear, monthlyTourismData, months]);
 
   const dashboardMonthLabel = useMemo(
     () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
@@ -533,100 +538,108 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [dashboardMonth, selectedMonthlyTourismRecord]);
   const isLockdown: number = selectedMonthlyTourismRecord?.isLockdown ? 1 : 0;
   const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? (Number(inflationRateInput) || 0);
-  const connectedEndpoint = useMemo(
-    () => endpoints.find((endpoint) => endpoint.status === 'active') ?? endpoints[0],
-    [endpoints]
-  );
-  const apiReflectedEndpoint = useMemo(
-    () => endpoints.find((endpoint) => endpoint.name === 'Historical Data Service') ?? connectedEndpoint,
-    [connectedEndpoint, endpoints]
-  );
+  const top10MarketHolidaySummary = useMemo(() => {
+    if (top10MarketHolidayForSelectedMonth.length === 0) {
+      return 'No Top10MH records for selected month';
+    }
+
+    return top10MarketHolidayForSelectedMonth
+      .slice(0, 3)
+      .map((item) => `${item.country} (${item.holidayCount})`)
+      .join(', ');
+  }, [top10MarketHolidayForSelectedMonth]);
+
   const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
-    const reflectionLabel = apiReflectedEndpoint
-      ? apiReflectedEndpoint.status === 'active'
-        ? `Connected via ${apiReflectedEndpoint.name}`
-        : `${apiReflectedEndpoint.name} currently disconnected`
-      : 'Awaiting API connection';
+    const peakMonthsText = peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None';
 
     return [
       {
+        label: 'Total Tourists',
+        value: `${(selectedDashboardData?.total ?? 0).toLocaleString()} tourists`,
+        statusLabel: 'monthly_tourism_dataset',
+        note: `Actual monthly total for ${dashboardMonthLabel}.`,
+      },
+      {
         label: 'Peak Season',
-        value: isPeakSeason === 1 ? 'Yes' : 'No',
-        statusLabel: 'Manual logic pending',
-        note: 'Binary: Yes = 1, No = 0.',
+        value: `${isPeakSeason === 1 ? 'Yes' : 'No'} (${peakMonthsText})`,
+        statusLabel: 'monthly_tourism_dataset',
+        note: 'From 2016-2025 dataset; 2026 onward follows API/manual updates.',
       },
       {
         label: 'Philippine Holidays',
         value: `${currentMonthHolidayCount} holidays`,
         endpointId: endpoints[0]?.id,
         endpointName: endpoints[0]?.name,
-        statusLabel: reflectionLabel,
-        note: 'Displaying the number of holidays in the current month.',
+        statusLabel: dashboardHolidayCountApi !== null ? 'Calendarific API' : 'monthly_tourism_dataset',
+        note: '2016-2025 uses dataset values; 2026 onward updates through API/manual input.',
       },
       {
         label: 'Average High Temperature',
         value: weatherLoading ? 'Loading…' : `${Number(monthHighTempC).toFixed(1)} °C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
-        statusLabel: weatherLoading
-          ? 'Fetching from Open-Meteo…'
+        statusLabel: selectedMonthlyTourismRecord?.avgHighTempC !== null && selectedMonthlyTourismRecord?.avgHighTempC !== undefined
+          ? 'monthly_tourism_dataset'
           : weatherSource === 'api'
-          ? 'Live data via Open-Meteo API'
-          : 'Using climatological average (API unavailable)',
-        note: `Average daily high temperature for ${dashboardMonthLabel} in Celsius.`,
+          ? 'Open-Meteo API'
+          : 'Manual input',
+        note: `Average high temperature for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
       },
       {
         label: 'Average Low Temperature',
         value: weatherLoading ? 'Loading…' : `${Number(monthLowTempC).toFixed(1)} °C`,
         endpointId: endpoints[1]?.id,
         endpointName: endpoints[1]?.name,
-        statusLabel: weatherLoading
-          ? 'Fetching from Open-Meteo…'
+        statusLabel: selectedMonthlyTourismRecord?.avgLowTempC !== null && selectedMonthlyTourismRecord?.avgLowTempC !== undefined
+          ? 'monthly_tourism_dataset'
           : weatherSource === 'api'
-          ? 'Live data via Open-Meteo API'
-          : 'Using climatological average (API unavailable)',
-        note: `Average daily low temperature for ${dashboardMonthLabel} in Celsius.`,
+          ? 'Open-Meteo API'
+          : 'Manual input',
+        note: `Average low temperature for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
       },
       {
         label: 'Precipitation',
         value: weatherLoading ? 'Loading…' : `${Number(monthPrecipitationCm).toFixed(1)} cm`,
         endpointId: endpoints[2]?.id,
         endpointName: endpoints[2]?.name,
-        statusLabel: weatherLoading
-          ? 'Fetching from Open-Meteo…'
+        statusLabel: selectedMonthlyTourismRecord?.precipitationCm !== null && selectedMonthlyTourismRecord?.precipitationCm !== undefined
+          ? 'monthly_tourism_dataset'
           : weatherSource === 'api'
-          ? 'Live data via Open-Meteo API'
-          : 'Using climatological average (API unavailable)',
-        note: `Total precipitation for ${dashboardMonthLabel} in centimetres.`,
+          ? 'Open-Meteo API'
+          : 'Manual input',
+        note: `Monthly precipitation for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
       },
       {
         label: 'Inflation Rate',
         value: `${inflationRateValue.toFixed(2)}%`,
-        statusLabel: selectedMonthlyTourismRecord ? 'Loaded from database record' : 'Manual fallback',
-        note: 'Database value is used when available; otherwise manual input is used.',
+        statusLabel: selectedMonthlyTourismRecord?.inflationRate !== null && selectedMonthlyTourismRecord?.inflationRate !== undefined
+          ? 'monthly_tourism_dataset'
+          : 'Manual input',
+        note: '2016-2025 uses dataset values; 2026 onward can come from API/manual input.',
       },
       {
         label: 'is December',
         value: isDecember === 1 ? 'Yes' : 'No',
-        statusLabel: 'Calendar-based parameter',
-        note: 'Binary: Yes = 1, No = 0.',
+        statusLabel: 'monthly_tourism_dataset',
+        note: 'Derived from selected month record.',
       },
       {
         label: 'is Lockdown',
         value: isLockdown === 1 ? 'Yes' : 'No',
-        statusLabel: 'Manual logic pending',
-        note: 'Binary: Yes = 1, No = 0.',
+        statusLabel: 'monthly_tourism_dataset',
+        note: 'Derived from selected month record.',
       },
       {
         label: 'Top 10 Market Holidays',
-        value: selectedMonthlyTourismRecord?.top10MarketHolidays || 'No entry for selected month',
-        statusLabel: selectedMonthlyTourismRecord ? 'Loaded from database record' : 'No database record selected',
-        note: 'Top 10 countries with highest tourist count in current month.',
+        value: top10MarketHolidaySummary,
+        statusLabel: 'backend/db/top10_market_holidays.csv',
+        note: 'Top 10 countries with holiday counts for the selected month from 2016-2025 dataset.',
       },
     ];
   }, [
-    apiReflectedEndpoint,
     currentMonthHolidayCount,
+    dashboardHolidayCountApi,
+    dashboardMonthLabel,
     endpoints,
     inflationRateInput,
     inflationRateValue,
@@ -636,8 +649,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
+    peakSeasonMonthsForYear,
+    selectedDashboardData,
     selectedMonthlyTourismRecord,
-    dashboardMonthLabel,
+    top10MarketHolidaySummary,
     weatherLoading,
     weatherSource,
   ]);
@@ -650,24 +665,75 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const touristParameterBarData = useMemo(
     () => [
-      { label: 'Peak Season', value: isPeakSeason },
+      { label: 'Total Tourists', value: selectedDashboardData?.total ?? 0 },
       { label: 'Holiday Count', value: currentMonthHolidayCount },
       { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC).toFixed(1)) },
       { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC).toFixed(1)) },
       { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm).toFixed(1)) },
       { label: 'Inflation Rate (%)', value: Number(Number(inflationRateValue).toFixed(2)) },
-      { label: 'Is December', value: isDecember },
     ],
     [
+      selectedDashboardData,
       currentMonthHolidayCount,
       inflationRateValue,
-      isDecember,
-      isPeakSeason,
       monthHighTempC,
       monthLowTempC,
       monthPrecipitationCm,
     ]
   );
+
+  const historicalDatasetRows = useMemo(
+    () => monthlyTourismData.filter((row) => row.year >= 2016 && row.year <= 2025),
+    [monthlyTourismData]
+  );
+
+  const selectedParameterDetails = useMemo(() => {
+    if (!selectedApiParameter) {
+      return [] as string[];
+    }
+
+    if (selectedApiParameter === 'Peak Season') {
+      return [
+        `Dataset coverage: 2016-2025 (${historicalDatasetRows.length} monthly records).`,
+        `Peak-season months in DB: ${peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}.`,
+        '2026 onward: values can be updated from API or manual input.',
+      ];
+    }
+
+    if (selectedApiParameter === 'Top 10 Market Holidays') {
+      return [
+        `Selected month records: ${top10MarketHolidayForSelectedMonth.length} entries.`,
+        `Top countries snapshot: ${top10MarketHolidaySummary}.`,
+        'Source file: backend/db/top10_market_holidays.csv (2016-2025).',
+        '2026 onward: values can be updated through API or manual input.',
+      ];
+    }
+
+    if (selectedApiParameter === 'Philippine Holidays') {
+      return [
+        `Dataset holiday count this month: ${currentMonthHolidayCount}.`,
+        `Data years in DB: 2016-2025; selected view: ${dashboardMonthLabel}.`,
+        '2026 onward: Calendarific API or manual input.',
+      ];
+    }
+
+    const totalTouristsAcrossHistory = historicalDatasetRows.reduce((sum, row) => sum + row.arrivals, 0);
+    return [
+      `Dataset coverage: 2016-2025 (${historicalDatasetRows.length} monthly records).`,
+      `Total tourists in dataset: ${totalTouristsAcrossHistory.toLocaleString()}.`,
+      `Selected month total tourists: ${(selectedDashboardData?.total ?? 0).toLocaleString()}.`,
+      '2026 onward: API-connected values and manual inputs are used when DB data is unavailable.',
+    ];
+  }, [
+    currentMonthHolidayCount,
+    dashboardMonthLabel,
+    historicalDatasetRows,
+    peakSeasonMonthsForYear,
+    selectedApiParameter,
+    selectedDashboardData,
+    top10MarketHolidayForSelectedMonth.length,
+    top10MarketHolidaySummary,
+  ]);
 
   const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [...tabs];
   const activeSectionLabel = activeTab === 'about'
@@ -946,7 +1012,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                       <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
                       <p className="text-3xl font-bold text-sky-500">
-                        {selectedDashboardData ? Math.round(selectedDashboardData.actualTotal).toLocaleString() : 'N/A'}
+                        {selectedDashboardData ? Math.round(selectedDashboardData.total).toLocaleString() : 'N/A'}
                       </p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
@@ -954,9 +1020,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                       <p className="text-3xl font-bold text-sky-500">{submissionRate}</p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist of ${dashboardMonthLabel}`}</p>
-                      <p className="text-3xl font-bold text-sky-500">
-                        {selectedDashboardData ? Math.round(selectedDashboardData.predictedTotal).toLocaleString() : 'N/A'}
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Peak Season Months (${dashboardYear})`}</p>
+                      <p className="text-xl font-bold text-sky-500 break-words">
+                        {peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}
                       </p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
@@ -968,8 +1034,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
                 <TouristForecastTrendChart
                   forecasts={tourismTrendForecasts}
-                  predictedMonths={predictedMonthsToShow}
-                  onPredictedMonthsChange={setPredictedMonthsToShow}
                 />
 
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
@@ -1000,11 +1064,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Metrics Tab */}
             {activeTab === 'metrics' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+                <div className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                  <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    Peak Season Months ({dashboardYear}): {peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}
+                  </p>
+                </div>
                 <MonthlyTouristArrivalsDataChart forecasts={tourismTrendForecasts} year={dashboardYear} />
                 <TouristForecastTrendChart
                   forecasts={tourismTrendForecasts}
-                  predictedMonths={predictedMonthsToShow}
-                  onPredictedMonthsChange={setPredictedMonthsToShow}
                 />
                 <TouristParametersBarChart parameters={touristParameterBarData} />
                 {latestMetric && <PerformanceChart latest={latestMetric} />}
@@ -1062,7 +1129,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                 {parameter.value}
                               </p>
                               <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                API reflection: {parameter.statusLabel}
+                                {parameter.statusLabel}
                               </p>
                               {parameter.note && (
                                 <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
@@ -1071,10 +1138,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                               )}
                             </div>
                             <button
-                              onClick={() => handleApiParameterAction(parameter.label, parameter.endpointId)}
+                              onClick={() => handleApiParameterAction(parameter.label)}
                               className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
                             >
-                              Check API
+                              Show Details
                             </button>
                           </div>
                         </div>
@@ -1083,67 +1150,87 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   </div>
 
                   {selectedApiParameter === 'Philippine Holidays' && (
-                    <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                      <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
-                        <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
-                        <div className="flex gap-2">
-                          <select
-                            value={viewDate.getMonth()}
-                            onChange={handleMonthChange}
-                            className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                          >
-                            {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
-                          </select>
-                          <select
-                            value={viewDate.getFullYear()}
-                            onChange={handleYearChange}
-                            className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                          >
-                            {years.map(year => <option key={year} value={year}>{year}</option>)}
-                          </select>
+                    <div className="space-y-4">
+                      <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                        <h3 className="text-lg font-bold">Show Details: Philippine Holidays</h3>
+                        <div className="mt-3 space-y-1">
+                          {selectedParameterDetails.map((detail) => (
+                            <p key={detail} className={`text-sm ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                              {detail}
+                            </p>
+                          ))}
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-7 gap-2 mt-4">
-                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                          <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
-                        ))}
-
-                        {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
-                          <div key={`empty-${i}`} className="min-h-[90px]"></div>
-                        ))}
-
-                        {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
-                          const day = i + 1;
-                          const holiday = holidayNameByDay[day] || getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
-                          const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
-
-                          return (
-                            <div
-                              key={day}
-                              className={`min-h-[90px] p-2 rounded border transition-colors ${
-                                isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
-                              } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
+                      <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
+                          <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
+                          <div className="flex gap-2">
+                            <select
+                              value={viewDate.getMonth()}
+                              onChange={handleMonthChange}
+                              className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
                             >
-                              <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
-                              {holiday && (
-                                <div className="mt-2">
-                                  <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
-                                    {holiday}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                              {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
+                            </select>
+                            <select
+                              value={viewDate.getFullYear()}
+                              onChange={handleYearChange}
+                              className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                            >
+                              {years.map(year => <option key={year} value={year}>{year}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-2 mt-4">
+                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                            <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
+                          ))}
+
+                          {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
+                            <div key={`empty-${i}`} className="min-h-[90px]"></div>
+                          ))}
+
+                          {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
+                            const day = i + 1;
+                            const holiday = holidayNameByDay[day] || getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
+                            const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
+
+                            return (
+                              <div
+                                key={day}
+                                className={`min-h-[90px] p-2 rounded border transition-colors ${
+                                  isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
+                                } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
+                              >
+                                <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
+                                {holiday && (
+                                  <div className="mt-2">
+                                    <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
+                                      {holiday}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {selectedApiParameter && selectedApiParameter !== 'Philippine Holidays' && (
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                      Active parameter: <span className="font-semibold">{selectedApiParameter}</span>
-                    </p>
+                    <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                      <h3 className="text-lg font-bold">Show Details: {selectedApiParameter}</h3>
+                      <div className="mt-3 space-y-1">
+                        {selectedParameterDetails.map((detail) => (
+                          <p key={detail} className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            {detail}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
 

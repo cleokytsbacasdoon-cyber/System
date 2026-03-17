@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 dotenv.config();
 
@@ -115,6 +117,34 @@ const mapMonthlyTourismDataset = (row) => ({
 });
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
+const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/top10_market_holidays.csv');
+
+const readTop10MarketHolidaysFromCsv = () => {
+  const raw = fs.readFileSync(TOP10_MARKET_HOLIDAYS_CSV_PATH, 'utf8').trim();
+  if (!raw) return [];
+
+  const [headerLine, ...dataLines] = raw.split(/\r?\n/);
+  const headers = headerLine.split(',').map((item) => item.trim());
+
+  return dataLines
+    .filter(Boolean)
+    .map((line) => {
+      const values = line.split(',').map((item) => item.trim());
+      const row = {};
+
+      headers.forEach((header, index) => {
+        row[header] = values[index];
+      });
+
+      return {
+        year: Number(row.year),
+        month: Number(row.month),
+        rank: Number(row.rank),
+        country: row.country,
+        holidayCount: Number(row.holiday_count),
+      };
+    });
+};
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -427,6 +457,31 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
     );
 
     res.status(201).json(mapMonthlyTourismDataset(result.rows[0]));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/datasets/tourism/top10-market-holidays', (req, res, next) => {
+  try {
+    const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+
+    if (year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) {
+      return res.status(400).json({ error: 'year must be an integer between 2000 and 2100' });
+    }
+
+    if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+      return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
+    }
+
+    const records = readTop10MarketHolidaysFromCsv().filter((row) => {
+      if (year !== undefined && row.year !== year) return false;
+      if (month !== undefined && row.month !== month) return false;
+      return true;
+    });
+
+    return res.json(records);
   } catch (error) {
     next(error);
   }

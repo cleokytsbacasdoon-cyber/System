@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord } from '../types';
 
 const getStaticPhilippineHolidays = (year: number): PhilippineHoliday[] => {
   const holidays: PhilippineHoliday[] = [
@@ -314,6 +314,39 @@ const generateSampleMonthlyTourismDataset = (): MonthlyTourismDatasetRecord[] =>
   return records;
 };
 
+const generateSampleTop10MarketHolidays = (): Top10MarketHolidayRecord[] => {
+  const countries = [
+    'United States',
+    'South Korea',
+    'China',
+    'Japan',
+    'Australia',
+    'Canada',
+    'United Kingdom',
+    'Germany',
+    'France',
+    'Singapore',
+  ];
+
+  const rows: Top10MarketHolidayRecord[] = [];
+
+  for (let year = 2016; year <= 2025; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      countries.forEach((country, index) => {
+        rows.push({
+          year,
+          month,
+          rank: index + 1,
+          country,
+          holidayCount: Math.max(0, Math.round((month % 4) + (index % 3) - 1)),
+        });
+      });
+    }
+  }
+
+  return rows;
+};
+
 const generateSampleFeatures = (): FeatureImportance[] => {
   const tourismFeatures = [
     { name: 'Seasonality', category: 'temporal' as const, baseImportance: 0.25 },
@@ -355,6 +388,7 @@ const mockModelVersions = generateSampleModelVersions();
 const mockDataQuality = generateSampleDataQuality();
 let mockForecasts = generateSampleForecasts();
 const mockMonthlyTourismDataset = generateSampleMonthlyTourismDataset();
+const mockTop10MarketHolidayData = generateSampleTop10MarketHolidays();
 const mockFeatures = generateSampleFeatures();
 const mockForecastInsights = generateSampleForecastInsights();
 let mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints);
@@ -496,6 +530,18 @@ export const mockApi = {
     await new Promise(resolve => setTimeout(resolve, 300));
 
     return mockMonthlyTourismDataset.filter((row) => {
+      if (params?.year !== undefined && row.year !== params.year) return false;
+      if (params?.month !== undefined && row.month !== params.month) return false;
+      return true;
+    });
+  },
+
+  getTop10MarketHolidays: async (
+    params?: { year?: number; month?: number }
+  ): Promise<Top10MarketHolidayRecord[]> => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    return mockTop10MarketHolidayData.filter((row) => {
       if (params?.year !== undefined && row.year !== params.year) return false;
       if (params?.month !== undefined && row.month !== params.month) return false;
       return true;

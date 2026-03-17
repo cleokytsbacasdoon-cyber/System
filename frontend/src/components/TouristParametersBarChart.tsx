@@ -80,7 +80,7 @@ export const TouristParametersBarChart: React.FC<TouristParametersBarChartProps>
   return (
     <div className={`rounded-lg shadow p-4 md:p-6 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
       <p className={`text-xl md:text-2xl font-bold text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-        Tourist Trend Parameters (Bar Graph)
+        Tourist Trend Parameters
       </p>
 
       <div className="h-72 md:h-80 mt-4">
