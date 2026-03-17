@@ -1,5 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday } from '../types';
+
+const getStaticPhilippineHolidays = (year: number): PhilippineHoliday[] => {
+  const holidays: PhilippineHoliday[] = [
+    { name: "New Year's Day", description: 'Regular Holiday', date: `${year}-01-01`, month: 1, day: 1, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'EDSA Revolution Anniversary', description: 'Special Non-working Day', date: `${year}-02-25`, month: 2, day: 25, type: ['Observance'], primaryType: 'Observance' },
+    { name: 'Araw ng Kagitingan', description: 'Regular Holiday', date: `${year}-04-09`, month: 4, day: 9, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'Labor Day', description: 'Regular Holiday', date: `${year}-05-01`, month: 5, day: 1, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'Independence Day', description: 'Regular Holiday', date: `${year}-06-12`, month: 6, day: 12, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'Ninoy Aquino Day', description: 'Special Non-working Day', date: `${year}-08-21`, month: 8, day: 21, type: ['Observance'], primaryType: 'Observance' },
+    { name: 'National Heroes Day', description: 'Regular Holiday', date: `${year}-08-25`, month: 8, day: 25, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: "All Saints' Day", description: 'Special Non-working Day', date: `${year}-11-01`, month: 11, day: 1, type: ['Observance'], primaryType: 'Observance' },
+    { name: 'Bonifacio Day', description: 'Regular Holiday', date: `${year}-11-30`, month: 11, day: 30, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'Christmas Day', description: 'Regular Holiday', date: `${year}-12-25`, month: 12, day: 25, type: ['National holiday'], primaryType: 'National holiday' },
+    { name: 'Rizal Day', description: 'Regular Holiday', date: `${year}-12-30`, month: 12, day: 30, type: ['National holiday'], primaryType: 'National holiday' },
+  ];
+
+  return holidays;
+};
 
 const ALERT_MODEL_ID = 'tourism-forecast-v1';
 
@@ -420,6 +438,13 @@ export const mockApi = {
   getForecastInsights: async (): Promise<ForecastInsights> => {
     await new Promise(resolve => setTimeout(resolve, 350));
     return mockForecastInsights;
+  },
+
+  getPhilippineHolidays: async (year: number, month?: number): Promise<PhilippineHoliday[]> => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const holidays = getStaticPhilippineHolidays(year);
+    if (!month) return holidays;
+    return holidays.filter((holiday) => holiday.month === month);
   },
 
   deployModelVersion: async (versionId: string): Promise<ModelVersion> => {

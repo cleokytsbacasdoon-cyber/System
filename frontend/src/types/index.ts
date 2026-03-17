@@ -74,6 +74,16 @@ export interface FeatureImportance {
   category?: 'temporal' | 'economic' | 'external' | 'historical';
 }
 
+export interface PhilippineHoliday {
+  name: string;
+  description: string;
+  date: string;
+  month: number;
+  day: number;
+  type: string[];
+  primaryType: string;
+}
+
 export interface ForecastInsights {
   topFeatures: FeatureImportance[];
   featureDrift: { [key: string]: number };

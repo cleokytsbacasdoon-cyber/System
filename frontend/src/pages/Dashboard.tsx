@@ -16,11 +16,12 @@ import {
   getDemandForecasts,
   getDataQuality,
   startRetrainingJob,
-  checkEndpointStatus 
+  checkEndpointStatus,
+  getPhilippineHolidays,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality } from '../types';
+import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -152,6 +153,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
   const [viewDate, setViewDate] = useState(new Date());
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | null>(null);
+  const [philippineHolidays, setPhilippineHolidays] = useState<PhilippineHoliday[]>([]);
+  const [dashboardHolidayCountApi, setDashboardHolidayCountApi] = useState<number | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [readAlertIds, setReadAlertIds] = useState<string[]>([]);
@@ -315,6 +318,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     });
   };
 
+  useEffect(() => {
+    const targetYear = viewDate.getFullYear();
+    const targetMonth = viewDate.getMonth() + 1;
+
+    getPhilippineHolidays(targetYear, targetMonth)
+      .then((items) => setPhilippineHolidays(items))
+      .catch(() => {
+        setPhilippineHolidays([]);
+      });
+  }, [viewDate]);
+
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
   const latestThreeAlerts = useMemo(
     () => [...alerts].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 3),
@@ -369,6 +383,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
     [dashboardYear, dashboardMonth]
   );
+
+  useEffect(() => {
+    getPhilippineHolidays(dashboardYear, dashboardMonth + 1)
+      .then((items) => setDashboardHolidayCountApi(items.length))
+      .catch(() => setDashboardHolidayCountApi(null));
+  }, [dashboardMonth, dashboardYear]);
+
   const bestModelUsed = useMemo(() => {
     const completed = jobs.filter((job) => job.status === 'completed');
     if (completed.length === 0) return 'N/A';
@@ -384,8 +405,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return 'N/A';
   }, [dataQuality]);
   const currentMonthHolidayCount = useMemo(() => {
+    if (dashboardHolidayCountApi !== null) {
+      return dashboardHolidayCountApi;
+    }
+
     const year = dashboardYear;
     const month = dashboardMonth;
+
     const totalDays = daysInMonth(year, month);
     let holidayCount = 0;
 
@@ -396,7 +422,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
 
     return holidayCount;
-  }, [dashboardMonth, dashboardYear]);
+  }, [dashboardHolidayCountApi, dashboardMonth, dashboardYear]);
+
+  const holidayNameByDay = useMemo(() => {
+    return philippineHolidays.reduce<Record<number, string>>((acc, holiday) => {
+      if (holiday.month === viewDate.getMonth() + 1 && holiday.day >= 1) {
+        acc[holiday.day] = holiday.name;
+      }
+      return acc;
+    }, {});
+  }, [philippineHolidays, viewDate]);
 
   // Weather data fetched from Open-Meteo API (falls back to climatological averages)
   const [weatherData, setWeatherData] = useState<MonthlyWeather | null>(null);
@@ -996,7 +1031,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
                         {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
                           const day = i + 1;
-                          const holiday = getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
+                          const holiday = holidayNameByDay[day] || getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
                           const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
 
                           return (

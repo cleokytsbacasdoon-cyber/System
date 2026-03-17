@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const axios = require('axios');
 
 dotenv.config();
 
@@ -86,6 +87,8 @@ const mapFeatureImportance = (row) => ({
   importance: Number(row.importance),
   category: row.category,
 });
+
+const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -285,6 +288,72 @@ app.get('/api/forecasts/insights', async (_req, res, next) => {
       sampleForecasts: sampleForecasts.rows.map(mapDemandForecast),
     });
   } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/holidays/philippines', async (req, res, next) => {
+  try {
+    const year = Number(req.query.year);
+    const month = req.query.month !== undefined ? Number(req.query.month) : undefined;
+
+    if (!Number.isInteger(year) || year < 1900 || year > 2100) {
+      return res.status(400).json({ error: 'year query parameter is required and must be between 1900 and 2100' });
+    }
+
+    if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+      return res.status(400).json({ error: 'month must be between 1 and 12 when provided' });
+    }
+
+    const apiKey = process.env.CALENDARIFIC_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({
+        error: 'Calendarific API key is not configured',
+        details: 'Set CALENDARIFIC_API_KEY in backend .env to enable holiday lookups.',
+      });
+    }
+
+    const params = {
+      api_key: apiKey,
+      country: 'PH',
+      year,
+    };
+
+    if (month !== undefined) {
+      params.month = month;
+    }
+
+    const response = await axios.get(CALENDARIFIC_BASE_URL, {
+      params,
+      timeout: 10000,
+    });
+
+    const holidays = (response.data?.response?.holidays || []).map((holiday) => ({
+      name: holiday.name,
+      description: holiday.description || '',
+      date: holiday.date?.iso,
+      month: holiday.date?.datetime?.month,
+      day: holiday.date?.datetime?.day,
+      type: Array.isArray(holiday.type) ? holiday.type : [],
+      primaryType: Array.isArray(holiday.type) && holiday.type.length > 0 ? holiday.type[0] : 'unknown',
+    }));
+
+    res.json({
+      country: 'PH',
+      year,
+      month: month ?? null,
+      source: 'calendarific',
+      count: holidays.length,
+      holidays,
+    });
+  } catch (error) {
+    if (error.response?.status) {
+      return res.status(error.response.status).json({
+        error: 'Calendarific request failed',
+        details: error.response.data,
+      });
+    }
+
     next(error);
   }
 });

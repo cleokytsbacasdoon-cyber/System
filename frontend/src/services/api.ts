@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday } from '../types';
 import { mockApi } from './mockApi';
 
 // Defaults keep the current mock-first behavior unless VITE_USE_MOCK_API=false.
@@ -120,6 +120,18 @@ export const getForecastInsights = async (): Promise<ForecastInsights> => {
   if (USE_MOCK_API) return mockApi.getForecastInsights();
   const response = await apiClient.get('/forecasts/insights');
   return response.data;
+};
+
+// Philippine Holiday API (Calendarific via backend)
+export const getPhilippineHolidays = async (year: number, month?: number): Promise<PhilippineHoliday[]> => {
+  if (USE_MOCK_API) return mockApi.getPhilippineHolidays(year, month);
+  const response = await apiClient.get('/holidays/philippines', {
+    params: {
+      year,
+      ...(month ? { month } : {}),
+    },
+  });
+  return response.data.holidays || [];
 };
 
 // Aliases for Dashboard compatibility
