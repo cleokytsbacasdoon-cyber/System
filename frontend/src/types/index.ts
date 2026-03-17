@@ -84,6 +84,24 @@ export interface PhilippineHoliday {
   primaryType: string;
 }
 
+export interface MonthlyTourismDatasetRecord {
+  id: number;
+  year: number;
+  month: number;
+  arrivals: number;
+  avgHighTempC: number | null;
+  avgLowTempC: number | null;
+  precipitationCm: number | null;
+  inflationRate: number | null;
+  isPeakSeason: boolean | null;
+  isDecember: boolean | null;
+  isLockdown: boolean | null;
+  philippineHolidayCount: number | null;
+  top10MarketHolidays: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ForecastInsights {
   topFeatures: FeatureImportance[];
   featureDrift: { [key: string]: number };

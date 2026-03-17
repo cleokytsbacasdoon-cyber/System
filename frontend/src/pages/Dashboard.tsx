@@ -15,13 +15,14 @@ import {
   getAPIEndpoints,
   getDemandForecasts,
   getDataQuality,
+  getMonthlyTourismDataset,
   startRetrainingJob,
   checkEndpointStatus,
   getPhilippineHolidays,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday } from '../types';
+import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -145,6 +146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [jobs, setJobs] = useState<RetrainingJob[]>([]);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
+  const [monthlyTourismData, setMonthlyTourismData] = useState<MonthlyTourismDatasetRecord[]>([]);
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -194,11 +196,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         getDemandForecasts(),
         getDataQuality(),
       ]);
+      const monthlyTourismDataset = await getMonthlyTourismDataset();
       setMetrics(metricsData);
       setAlerts(alertsData);
       setJobs(jobsData);
       setEndpoints(endpointsData);
       setForecasts(forecastsData);
+      setMonthlyTourismData(monthlyTourismDataset);
       setDataQuality(qualityData);
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
@@ -342,7 +346,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     () => (forecasts.length > 0 ? forecasts[forecasts.length - 1] : null),
     [forecasts]
   );
+  const tourismTrendForecasts = useMemo<DemandForecast[]>(() => {
+    if (monthlyTourismData.length === 0) {
+      return forecasts;
+    }
+
+    return [...monthlyTourismData]
+      .sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+      })
+      .map((row) => ({
+        id: `monthly-${row.year}-${row.month}`,
+        actualOccupancy: row.arrivals,
+        predictedOccupancy: row.arrivals,
+        error: 0,
+        date: new Date(row.year, row.month - 1, 1).toISOString(),
+        location: 'Tourism Dataset',
+        accommodationType: 'All',
+      }));
+  }, [forecasts, monthlyTourismData]);
+
   const monthlyForecastMap = useMemo(() => {
+    if (monthlyTourismData.length > 0) {
+      return monthlyTourismData.reduce<Record<string, { actualTotal: number; predictedTotal: number }>>((acc, item) => {
+        const key = `${item.year}-${item.month - 1}`;
+        acc[key] = {
+          actualTotal: item.arrivals,
+          predictedTotal: item.arrivals,
+        };
+        return acc;
+      }, {});
+    }
+
     return forecasts.reduce<Record<string, { actualTotal: number; predictedTotal: number }>>((acc, item) => {
       const date = new Date(item.date);
       const key = `${date.getFullYear()}-${date.getMonth()}`;
@@ -355,13 +391,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       acc[key].predictedTotal += item.predictedOccupancy;
       return acc;
     }, {});
-  }, [forecasts]);
+  }, [forecasts, monthlyTourismData]);
 
   useEffect(() => {
-    if (selectedDashboardDate || forecasts.length === 0) return;
+    if (selectedDashboardDate) return;
+
+    if (monthlyTourismData.length > 0) {
+      const latestRow = [...monthlyTourismData].sort((a, b) => {
+        if (a.year !== b.year) return b.year - a.year;
+        return b.month - a.month;
+      })[0];
+
+      if (latestRow) {
+        setSelectedDashboardDate(new Date(latestRow.year, latestRow.month - 1, 1));
+        return;
+      }
+    }
+
+    if (forecasts.length === 0) return;
     const latestDate = new Date(forecasts[forecasts.length - 1].date);
     setSelectedDashboardDate(new Date(latestDate.getFullYear(), latestDate.getMonth(), 1));
-  }, [forecasts, selectedDashboardDate]);
+  }, [forecasts, monthlyTourismData, selectedDashboardDate]);
 
   const dashboardMonth = useMemo(() => {
     if (selectedDashboardDate) return selectedDashboardDate.getMonth();
@@ -378,6 +428,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const selectedDashboardData = useMemo(() => {
     return monthlyForecastMap[`${dashboardYear}-${dashboardMonth}`] ?? null;
   }, [monthlyForecastMap, dashboardYear, dashboardMonth]);
+
+  const selectedMonthlyTourismRecord = useMemo(() => {
+    return monthlyTourismData.find(
+      (row) => row.year === dashboardYear && row.month === dashboardMonth + 1
+    ) || null;
+  }, [dashboardMonth, dashboardYear, monthlyTourismData]);
 
   const dashboardMonthLabel = useMemo(
     () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
@@ -409,6 +465,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return 'N/A';
   }, [dataQuality]);
   const currentMonthHolidayCount = useMemo(() => {
+    if (selectedMonthlyTourismRecord?.philippineHolidayCount !== null && selectedMonthlyTourismRecord?.philippineHolidayCount !== undefined) {
+      return selectedMonthlyTourismRecord.philippineHolidayCount;
+    }
+
     if (dashboardHolidayCountApi !== null) {
       return dashboardHolidayCountApi;
     }
@@ -426,7 +486,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
 
     return holidayCount;
-  }, [dashboardHolidayCountApi, dashboardMonth, dashboardYear]);
+  }, [dashboardHolidayCountApi, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
 
   const holidayNameByDay = useMemo(() => {
     return philippineHolidays.reduce<Record<number, string>>((acc, holiday) => {
@@ -452,16 +512,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const FALLBACK_LOW  = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
   const FALLBACK_PREC = [7.2,  6.8,  5.9,  4.8,  9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
 
-  const monthHighTempC       = weatherData?.avgHighTemp        ?? FALLBACK_HIGH[dashboardMonth];
-  const monthLowTempC        = weatherData?.avgLowTemp         ?? FALLBACK_LOW[dashboardMonth];
-  const monthPrecipitationCm = weatherData?.totalPrecipitation ?? FALLBACK_PREC[dashboardMonth];
+  const monthHighTempC       = selectedMonthlyTourismRecord?.avgHighTempC ?? weatherData?.avgHighTemp        ?? FALLBACK_HIGH[dashboardMonth];
+  const monthLowTempC        = selectedMonthlyTourismRecord?.avgLowTempC ?? weatherData?.avgLowTemp         ?? FALLBACK_LOW[dashboardMonth];
+  const monthPrecipitationCm = selectedMonthlyTourismRecord?.precipitationCm ?? weatherData?.totalPrecipitation ?? FALLBACK_PREC[dashboardMonth];
   const weatherSource        = weatherData?.source ?? 'fallback';
   const isPeakSeason = useMemo(() => {
+    if (selectedMonthlyTourismRecord?.isPeakSeason !== null && selectedMonthlyTourismRecord?.isPeakSeason !== undefined) {
+      return selectedMonthlyTourismRecord.isPeakSeason ? 1 : 0;
+    }
+
     const peakSeasonMonths = [2, 3, 4, 11];
     return peakSeasonMonths.includes(dashboardMonth) ? 1 : 0;
-  }, [dashboardMonth]);
-  const isDecember = useMemo(() => (dashboardMonth === 11 ? 1 : 0), [dashboardMonth]);
-  const isLockdown: number = 0;
+  }, [dashboardMonth, selectedMonthlyTourismRecord]);
+  const isDecember = useMemo(() => {
+    if (selectedMonthlyTourismRecord?.isDecember !== null && selectedMonthlyTourismRecord?.isDecember !== undefined) {
+      return selectedMonthlyTourismRecord.isDecember ? 1 : 0;
+    }
+
+    return dashboardMonth === 11 ? 1 : 0;
+  }, [dashboardMonth, selectedMonthlyTourismRecord]);
+  const isLockdown: number = selectedMonthlyTourismRecord?.isLockdown ? 1 : 0;
+  const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? (Number(inflationRateInput) || 0);
   const connectedEndpoint = useMemo(
     () => endpoints.find((endpoint) => endpoint.status === 'active') ?? endpoints[0],
     [endpoints]
@@ -530,9 +601,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Inflation Rate',
-        value: `${inflationRateInput}%`,
-        statusLabel: 'Manual logic pending',
-        note: 'Input value is reflected in this parameter.',
+        value: `${inflationRateValue.toFixed(2)}%`,
+        statusLabel: selectedMonthlyTourismRecord ? 'Loaded from database record' : 'Manual fallback',
+        note: 'Database value is used when available; otherwise manual input is used.',
       },
       {
         label: 'is December',
@@ -548,8 +619,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Top 10 Market Holidays',
-        value: 'Will be reflected in data later',
-        statusLabel: 'Manual logic pending',
+        value: selectedMonthlyTourismRecord?.top10MarketHolidays || 'No entry for selected month',
+        statusLabel: selectedMonthlyTourismRecord ? 'Loaded from database record' : 'No database record selected',
         note: 'Top 10 countries with highest tourist count in current month.',
       },
     ];
@@ -558,12 +629,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     currentMonthHolidayCount,
     endpoints,
     inflationRateInput,
+    inflationRateValue,
     isDecember,
     isLockdown,
     isPeakSeason,
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
+    selectedMonthlyTourismRecord,
     dashboardMonthLabel,
     weatherLoading,
     weatherSource,
@@ -582,12 +655,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC).toFixed(1)) },
       { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC).toFixed(1)) },
       { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm).toFixed(1)) },
-      { label: 'Inflation Rate (%)', value: Number(inflationRateInput) || 0 },
+      { label: 'Inflation Rate (%)', value: Number(Number(inflationRateValue).toFixed(2)) },
       { label: 'Is December', value: isDecember },
     ],
     [
       currentMonthHolidayCount,
-      inflationRateInput,
+      inflationRateValue,
       isDecember,
       isPeakSeason,
       monthHighTempC,
@@ -894,7 +967,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 </div>
 
                 <TouristForecastTrendChart
-                  forecasts={forecasts}
+                  forecasts={tourismTrendForecasts}
                   predictedMonths={predictedMonthsToShow}
                   onPredictedMonthsChange={setPredictedMonthsToShow}
                 />
@@ -927,9 +1000,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {/* Metrics Tab */}
             {activeTab === 'metrics' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <MonthlyTouristArrivalsDataChart forecasts={forecasts} year={dashboardYear} />
+                <MonthlyTouristArrivalsDataChart forecasts={tourismTrendForecasts} year={dashboardYear} />
                 <TouristForecastTrendChart
-                  forecasts={forecasts}
+                  forecasts={tourismTrendForecasts}
                   predictedMonths={predictedMonthsToShow}
                   onPredictedMonthsChange={setPredictedMonthsToShow}
                 />

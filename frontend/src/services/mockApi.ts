@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
 
 const getStaticPhilippineHolidays = (year: number): PhilippineHoliday[] => {
   const holidays: PhilippineHoliday[] = [
@@ -272,6 +272,48 @@ const generateSampleForecasts = (): DemandForecast[] => {
   return forecasts.reverse();
 };
 
+const generateSampleMonthlyTourismDataset = (): MonthlyTourismDatasetRecord[] => {
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+
+  const records: MonthlyTourismDatasetRecord[] = [];
+  let idCounter = 1;
+
+  for (let year = 2016; year <= 2025; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      const seasonalBoost = [11, 12, 1, 2, 3].includes(month) ? 9000 : 0;
+      const arrivals = Math.round(46000 + Math.random() * 18000 + seasonalBoost);
+      const avgHigh = Number((30 + Math.random() * 3).toFixed(2));
+      const avgLow = Number((23 + Math.random() * 2.5).toFixed(2));
+      const precipitation = Number((Math.random() * 20).toFixed(2));
+
+      records.push({
+        id: idCounter,
+        year,
+        month,
+        arrivals,
+        avgHighTempC: avgHigh,
+        avgLowTempC: avgLow,
+        precipitationCm: precipitation,
+        inflationRate: Number((1.5 + Math.random() * 4).toFixed(2)),
+        isPeakSeason: [3, 4, 5, 12].includes(month),
+        isDecember: month === 12,
+        isLockdown: year >= 2020 && year <= 2021,
+        philippineHolidayCount: 1 + Math.floor(Math.random() * 5),
+        top10MarketHolidays: `${monthNames[month - 1]} demand pattern`,
+        createdAt: new Date(year, month - 1, 1).toISOString(),
+        updatedAt: new Date(year, month - 1, 1).toISOString(),
+      });
+
+      idCounter += 1;
+    }
+  }
+
+  return records;
+};
+
 const generateSampleFeatures = (): FeatureImportance[] => {
   const tourismFeatures = [
     { name: 'Seasonality', category: 'temporal' as const, baseImportance: 0.25 },
@@ -312,6 +354,7 @@ const mockEndpoints = generateSampleEndpoints();
 const mockModelVersions = generateSampleModelVersions();
 const mockDataQuality = generateSampleDataQuality();
 let mockForecasts = generateSampleForecasts();
+const mockMonthlyTourismDataset = generateSampleMonthlyTourismDataset();
 const mockFeatures = generateSampleFeatures();
 const mockForecastInsights = generateSampleForecastInsights();
 let mockAlerts = buildSystemAlerts(mockForecasts, mockEndpoints);
@@ -445,6 +488,18 @@ export const mockApi = {
   getDemandForecasts: async (): Promise<DemandForecast[]> => {
     await new Promise(resolve => setTimeout(resolve, 300));
     return mockForecasts;
+  },
+
+  getMonthlyTourismDataset: async (
+    params?: { year?: number; month?: number }
+  ): Promise<MonthlyTourismDatasetRecord[]> => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    return mockMonthlyTourismDataset.filter((row) => {
+      if (params?.year !== undefined && row.year !== params.year) return false;
+      if (params?.month !== undefined && row.month !== params.month) return false;
+      return true;
+    });
   },
 
   getFeatureImportance: async (): Promise<FeatureImportance[]> => {

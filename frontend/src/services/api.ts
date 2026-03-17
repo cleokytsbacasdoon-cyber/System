@@ -1,9 +1,9 @@
 import axios from 'axios';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord } from '../types';
 import { mockApi } from './mockApi';
 
-// Defaults keep the current mock-first behavior unless VITE_USE_MOCK_API=false.
-const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API !== 'false';
+// Backend-first by default. Set VITE_USE_MOCK_API=true to force local mock mode.
+const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === 'true';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
@@ -105,6 +105,14 @@ export const getDataQuality = async (): Promise<DataQuality> => {
 export const getDemandForecasts = async (): Promise<DemandForecast[]> => {
   if (USE_MOCK_API) return mockApi.getDemandForecasts();
   const response = await apiClient.get('/forecasts');
+  return response.data;
+};
+
+export const getMonthlyTourismDataset = async (
+  params?: { year?: number; month?: number }
+): Promise<MonthlyTourismDatasetRecord[]> => {
+  if (USE_MOCK_API) return mockApi.getMonthlyTourismDataset(params);
+  const response = await apiClient.get('/datasets/tourism/monthly', { params });
   return response.data;
 };
 
