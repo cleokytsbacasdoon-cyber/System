@@ -559,12 +559,14 @@ app.post('/api/ml/retrain/simulate-monthly', async (req, res, next) => {
 app.get('/api/forecasts', async (req, res, next) => {
   try {
     const preferLegacy = String(req.query.source || '').toLowerCase() === 'legacy';
+    const monthsAheadRaw = Number(req.query.monthsAhead ?? 12);
+    const monthsAhead = Number.isInteger(monthsAheadRaw) && monthsAheadRaw > 0 ? Math.min(monthsAheadRaw, 24) : 12;
 
     if (!preferLegacy) {
       try {
         const monthlyResult = await query('SELECT * FROM monthly_tourism_dataset ORDER BY year, month');
         if (monthlyResult.rowCount > 0) {
-          const forecastSeries = await buildForecastSeries(monthlyResult.rows, 12);
+          const forecastSeries = await buildForecastSeries(monthlyResult.rows, monthsAhead);
           return res.json(forecastSeries);
         }
       } catch (modelError) {

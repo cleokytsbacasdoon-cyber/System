@@ -29,10 +29,6 @@ interface DashboardProps {
 interface TouristTrendParameter {
   label: string;
   value: string;
-  endpointName?: string;
-  endpointId?: string;
-  statusLabel: string;
-  note?: string;
 }
 
 interface NotificationItem {
@@ -164,6 +160,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [backendApiConnected, setBackendApiConnected] = useState(false);
   const [baseModelNameInput, setBaseModelNameInput] = useState('xgboost_base');
+  const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
   const [simulateMonth, setSimulateMonth] = useState(new Date().getMonth() + 1);
   const [simulateYear, setSimulateYear] = useState(new Date().getFullYear());
   const [isSimulating, setIsSimulating] = useState(false);
@@ -206,7 +203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         getModelMetrics(),
         getDriftAlerts(),
         getAPIEndpoints(),
-        getDemandForecasts(),
+        getDemandForecasts(predictionHorizonMonths),
         getDataQuality(),
         getMonthlyTourismDataset(),
         getTop10MarketHolidays(),
@@ -227,7 +224,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     } finally {
       setLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, predictionHorizonMonths]);
 
   useEffect(() => {
     loadData();
@@ -364,8 +361,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     [forecasts]
   );
   const tourismTrendForecasts = useMemo<DemandForecast[]>(() => {
-    if (monthlyTourismData.length === 0) {
-      return forecasts;
+    if (forecasts.length > 0) {
+      return [...forecasts].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }
 
     return [...monthlyTourismData]
@@ -456,18 +453,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       .sort((a, b) => a.rank - b.rank);
   }, [dashboardMonth, dashboardYear, top10MarketHolidayData]);
 
-  const peakSeasonMonthsForYear = useMemo(() => {
-    const monthNumbers = Array.from(
-      new Set(
-        monthlyTourismData
-          .filter((row) => row.year === dashboardYear && row.isPeakSeason)
-          .map((row) => row.month)
-      )
-    ).sort((a, b) => a - b);
-
-    return monthNumbers.map((monthNumber) => months[monthNumber - 1]);
-  }, [dashboardYear, monthlyTourismData, months]);
-
   const dashboardMonthLabel = useMemo(
     () => new Date(dashboardYear, dashboardMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' }),
     [dashboardYear, dashboardMonth]
@@ -482,6 +467,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const bestModelUsed = useMemo(() => {
     const active = trainedModels.find((model) => model.inUse);
     return active?.modelName || 'xgboost_base';
+  }, [trainedModels]);
+  const bestModelAccuracy = useMemo(() => {
+    const active = trainedModels.find((model) => model.inUse);
+    return typeof active?.accuracy === 'number' ? `${(active.accuracy * 100).toFixed(2)}%` : 'N/A';
   }, [trainedModels]);
   const submissionRate = useMemo(() => {
     if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
@@ -529,127 +518,110 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const monthHighTempC       = selectedMonthlyTourismRecord?.avgHighTempC ?? weatherData?.avgHighTemp        ?? FALLBACK_HIGH[dashboardMonth];
   const monthLowTempC        = selectedMonthlyTourismRecord?.avgLowTempC ?? weatherData?.avgLowTemp         ?? FALLBACK_LOW[dashboardMonth];
   const monthPrecipitationCm = selectedMonthlyTourismRecord?.precipitationCm ?? weatherData?.totalPrecipitation ?? FALLBACK_PREC[dashboardMonth];
-  const weatherSource        = weatherData?.source ?? 'fallback';
+  const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? 0;
   const isPeakSeason = useMemo(() => {
     if (selectedMonthlyTourismRecord?.isPeakSeason !== null && selectedMonthlyTourismRecord?.isPeakSeason !== undefined) {
-      return selectedMonthlyTourismRecord.isPeakSeason ? 1 : 0;
+      return selectedMonthlyTourismRecord.isPeakSeason;
     }
 
     const peakSeasonMonths = [2, 3, 4, 11];
-    return peakSeasonMonths.includes(dashboardMonth) ? 1 : 0;
+    return peakSeasonMonths.includes(dashboardMonth);
   }, [dashboardMonth, selectedMonthlyTourismRecord]);
   const isDecember = useMemo(() => {
     if (selectedMonthlyTourismRecord?.isDecember !== null && selectedMonthlyTourismRecord?.isDecember !== undefined) {
-      return selectedMonthlyTourismRecord.isDecember ? 1 : 0;
+      return selectedMonthlyTourismRecord.isDecember;
     }
 
-    return dashboardMonth === 11 ? 1 : 0;
+    return dashboardMonth === 11;
   }, [dashboardMonth, selectedMonthlyTourismRecord]);
-  const isLockdown: number = selectedMonthlyTourismRecord?.isLockdown ? 1 : 0;
-  const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? 0;
+  const isLockdown = selectedMonthlyTourismRecord?.isLockdown ?? false;
+
+  const nextMonthDate = useMemo(() => new Date(dashboardYear, dashboardMonth + 1, 1), [dashboardMonth, dashboardYear]);
+  const nextMonthLabel = useMemo(
+    () => nextMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    [nextMonthDate]
+  );
+  const predictedNextMonthTotal = useMemo(() => {
+    const targetYear = nextMonthDate.getFullYear();
+    const targetMonth = nextMonthDate.getMonth();
+
+    const candidates = tourismTrendForecasts.filter((entry) => {
+      const entryDate = new Date(entry.date);
+      return entryDate.getFullYear() === targetYear && entryDate.getMonth() === targetMonth;
+    });
+
+    if (candidates.length === 0) return null;
+
+    const forecastRows = candidates.filter((entry) =>
+      String(entry.id || '').startsWith('ml-f-')
+      || String(entry.accommodationType || '').toLowerCase().includes('forecast')
+    );
+
+    const sourceRows = forecastRows.length > 0 ? forecastRows : candidates;
+    const predicted = sourceRows.reduce((sum, entry) => sum + (Number(entry.predictedOccupancy) || 0), 0);
+
+    if (predicted > 0) return Math.round(predicted);
+
+    const fallbackActual = sourceRows.reduce((sum, entry) => sum + (Number(entry.actualOccupancy) || 0), 0);
+    return fallbackActual > 0 ? Math.round(fallbackActual) : null;
+  }, [nextMonthDate, tourismTrendForecasts]);
+
   const top10MarketHolidaySummary = useMemo(() => {
     if (top10MarketHolidayForSelectedMonth.length === 0) {
       return 'No Top10MH records for selected month';
     }
 
     return top10MarketHolidayForSelectedMonth
-      .slice(0, 3)
-      .map((item) => `${item.country} (${item.holidayCount})`)
-      .join(', ');
+      .map((item) => `${item.country}  ${item.holidayCount} holiday${item.holidayCount > 1 ? 'ies' : 'y'}`)
+      .join('\n');
   }, [top10MarketHolidayForSelectedMonth]);
 
-  const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
-    const peakMonthsText = peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None';
+  const top10MarketHolidayCount = useMemo(
+    () => top10MarketHolidayForSelectedMonth.reduce((sum, item) => sum + item.holidayCount, 0),
+    [top10MarketHolidayForSelectedMonth]
+  );
 
+  const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
     return [
-      {
-        label: 'Total Tourists',
-        value: `${(selectedDashboardData?.total ?? 0).toLocaleString()} tourists`,
-        statusLabel: 'monthly_tourism_dataset',
-        note: `Actual monthly total for ${dashboardMonthLabel}.`,
-      },
-      {
-        label: 'Peak Season',
-        value: `${isPeakSeason === 1 ? 'Yes' : 'No'} (${peakMonthsText})`,
-        statusLabel: 'monthly_tourism_dataset',
-        note: 'From 2016-2025 dataset; 2026 onward follows API/manual updates.',
-      },
-      {
-        label: 'Philippine Holidays',
-        value: `${currentMonthHolidayCount} holidays`,
-        endpointId: endpoints[0]?.id,
-        endpointName: endpoints[0]?.name,
-        statusLabel: dashboardHolidayCountApi !== null ? 'Calendarific API' : 'monthly_tourism_dataset',
-        note: '2016-2025 uses dataset values; 2026 onward updates through API/manual input.',
-      },
       {
         label: 'Average High Temperature',
         value: weatherLoading ? 'Loading…' : `${Number(monthHighTempC).toFixed(1)} °C`,
-        endpointId: endpoints[1]?.id,
-        endpointName: endpoints[1]?.name,
-        statusLabel: selectedMonthlyTourismRecord?.avgHighTempC !== null && selectedMonthlyTourismRecord?.avgHighTempC !== undefined
-          ? 'monthly_tourism_dataset'
-          : weatherSource === 'api'
-          ? 'Open-Meteo API'
-          : 'Manual input',
-        note: `Average high temperature for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
       },
       {
         label: 'Average Low Temperature',
         value: weatherLoading ? 'Loading…' : `${Number(monthLowTempC).toFixed(1)} °C`,
-        endpointId: endpoints[1]?.id,
-        endpointName: endpoints[1]?.name,
-        statusLabel: selectedMonthlyTourismRecord?.avgLowTempC !== null && selectedMonthlyTourismRecord?.avgLowTempC !== undefined
-          ? 'monthly_tourism_dataset'
-          : weatherSource === 'api'
-          ? 'Open-Meteo API'
-          : 'Manual input',
-        note: `Average low temperature for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
-      },
-      {
-        label: 'Precipitation',
-        value: weatherLoading ? 'Loading…' : `${Number(monthPrecipitationCm).toFixed(1)} cm`,
-        endpointId: endpoints[2]?.id,
-        endpointName: endpoints[2]?.name,
-        statusLabel: selectedMonthlyTourismRecord?.precipitationCm !== null && selectedMonthlyTourismRecord?.precipitationCm !== undefined
-          ? 'monthly_tourism_dataset'
-          : weatherSource === 'api'
-          ? 'Open-Meteo API'
-          : 'Manual input',
-        note: `Monthly precipitation for ${dashboardMonthLabel}; future years use API/manual if DB has no values.`,
-      },
-      {
-        label: 'Inflation Rate',
-        value: `${inflationRateValue.toFixed(2)}%`,
-        statusLabel: selectedMonthlyTourismRecord?.inflationRate !== null && selectedMonthlyTourismRecord?.inflationRate !== undefined
-          ? 'monthly_tourism_dataset'
-          : 'Manual input',
-        note: '2016-2025 uses dataset values; 2026 onward can come from API/manual input.',
-      },
-      {
-        label: 'is December',
-        value: isDecember === 1 ? 'Yes' : 'No',
-        statusLabel: 'monthly_tourism_dataset',
-        note: 'Derived from selected month record.',
-      },
-      {
-        label: 'is Lockdown',
-        value: isLockdown === 1 ? 'Yes' : 'No',
-        statusLabel: 'monthly_tourism_dataset',
-        note: 'Derived from selected month record.',
       },
       {
         label: 'Top 10 Market Holidays',
         value: top10MarketHolidaySummary,
-        statusLabel: 'backend/db/top10_market_holidays.csv',
-        note: 'Top 10 countries with holiday counts for the selected month from 2016-2025 dataset.',
+      },
+      {
+        label: 'Precipitation',
+        value: weatherLoading ? 'Loading…' : `${Number(monthPrecipitationCm).toFixed(1)} cm`,
+      },
+      {
+        label: 'Inflation Rate',
+        value: `${inflationRateValue.toFixed(2)}%`,
+      },
+      {
+        label: 'Peak Season',
+        value: isPeakSeason ? 'Yes' : 'No',
+      },
+      {
+        label: 'is December?',
+        value: isDecember ? 'Yes' : 'No',
+      },
+      {
+        label: 'is Lockdown',
+        value: isLockdown ? 'Yes' : 'No',
+      },
+      {
+        label: 'Philippine Holidays',
+        value: `${currentMonthHolidayCount} holidays`,
       },
     ];
   }, [
     currentMonthHolidayCount,
-    dashboardHolidayCountApi,
-    dashboardMonthLabel,
-    endpoints,
     inflationRateValue,
     isDecember,
     isLockdown,
@@ -657,12 +629,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
-    peakSeasonMonthsForYear,
-    selectedDashboardData,
-    selectedMonthlyTourismRecord,
     top10MarketHolidaySummary,
     weatherLoading,
-    weatherSource,
   ]);
 
   const tabs: Array<{ id: string; label: string; icon: DashboardIconName }> = [
@@ -673,20 +641,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const touristParameterBarData = useMemo(
     () => [
-      { label: 'Total Tourists', value: selectedDashboardData?.total ?? 0 },
-      { label: 'Holiday Count', value: currentMonthHolidayCount },
       { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC).toFixed(1)) },
       { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC).toFixed(1)) },
       { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm).toFixed(1)) },
       { label: 'Inflation Rate (%)', value: Number(Number(inflationRateValue).toFixed(2)) },
+      { label: 'PH Holidays', value: currentMonthHolidayCount },
+      { label: 'Top 10 Market Holidays', value: top10MarketHolidayCount },
     ],
     [
-      selectedDashboardData,
       currentMonthHolidayCount,
       inflationRateValue,
       monthHighTempC,
       monthLowTempC,
       monthPrecipitationCm,
+      top10MarketHolidayCount,
     ]
   );
 
@@ -1030,7 +998,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           <div className="px-4 md:px-8 xl:px-10 py-8">
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
-              {(activeTab === 'overview' || activeTab === 'metrics') && (
+              {activeTab === 'overview' && (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <select
                     value={dashboardMonth}
@@ -1058,7 +1026,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
             {activeTab === 'overview' && (
               <div className="space-y-8">
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                       <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
                       <p className="text-3xl font-bold text-sky-500">
@@ -1070,20 +1038,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                       <p className="text-3xl font-bold text-sky-500">{submissionRate}</p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
-                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Peak Season Months (${dashboardYear})`}</p>
-                      <p className="text-xl font-bold text-sky-500 break-words">
-                        {peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Predicted Tourist Arrivals (${nextMonthLabel})`}</p>
+                      <p className="text-3xl font-bold text-sky-500 break-words">
+                        {predictedNextMonthTotal !== null ? predictedNextMonthTotal.toLocaleString() : 'N/A'}
                       </p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                       <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Best Model Used</p>
                       <p className="text-xl font-bold text-sky-500 break-all">{bestModelUsed}</p>
                     </div>
+                    <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
+                      <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Model Accuracy</p>
+                      <p className="text-3xl font-bold text-sky-500">{bestModelAccuracy}</p>
+                    </div>
                   </div>
                 </div>
 
                 <TouristForecastTrendChart
                   forecasts={tourismTrendForecasts}
+                  monthsAhead={predictionHorizonMonths}
+                  horizonSelectorValue={predictionHorizonMonths}
+                  onHorizonSelectorChange={(value) => setPredictionHorizonMonths(value)}
+                  centerTitle
                 />
 
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
@@ -1091,6 +1067,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <p className="text-xl md:text-2xl font-bold mb-3">Tourist Trends Data Parameters</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {touristTrendParameters.map((parameter) => {
+                        const isTopMarketHoliday = parameter.label === 'Top 10 Market Holidays';
+
                         return (
                           <div
                             key={parameter.label}
@@ -1101,30 +1079,73 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             }`}
                           >
                             <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{parameter.label}</p>
-                            <p className="mt-2 text-xl font-bold text-sky-500">{parameter.value}</p>
+                            <p className={`mt-2 text-sky-500 ${isTopMarketHoliday ? 'text-base font-semibold whitespace-pre-line leading-7' : 'text-xl font-bold'}`}>
+                              {parameter.value}
+                            </p>
                           </div>
                         );
                       })}
                     </div>
                   </div>
                 </div>
+
               </div>
             )}
 
             {/* Metrics Tab */}
             {activeTab === 'metrics' && (
               <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
-                <div className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                  <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Peak Season Months ({dashboardYear}): {peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}
-                  </p>
+                <MonthlyTouristArrivalsDataChart
+                  forecasts={tourismTrendForecasts}
+                  year={dashboardYear}
+                  years={years}
+                  onYearChange={(year) => {
+                    setSelectedDashboardDate((prev) => {
+                      const base = prev ?? new Date();
+                      return new Date(year, base.getMonth(), 1);
+                    });
+                  }}
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Monthly Tourist Trend</p>
+                  <select
+                    value={predictionHorizonMonths}
+                    onChange={(e) => setPredictionHorizonMonths(Number(e.target.value) as 3 | 6 | 12)}
+                    className={`p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  >
+                    <option value={3}>3 months</option>
+                    <option value={6}>6 months</option>
+                    <option value={12}>12 months</option>
+                  </select>
                 </div>
-                <MonthlyTouristArrivalsDataChart forecasts={tourismTrendForecasts} year={dashboardYear} />
                 <TouristForecastTrendChart
                   forecasts={tourismTrendForecasts}
+                  monthsAhead={predictionHorizonMonths}
                 />
+                <div className="pt-4 flex flex-col sm:flex-row sm:items-center gap-2">
+                  <select
+                    value={dashboardMonth}
+                    onChange={handleDashboardMonthChange}
+                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  >
+                    {months.map((month, i) => (
+                      <option key={month} value={i}>{month}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={dashboardYear}
+                    onChange={handleDashboardYearChange}
+                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                  >
+                    {years.map((year) => (
+                      <option key={year} value={year}>{year}</option>
+                    ))}
+                  </select>
+                </div>
                 <TouristParametersBarChart parameters={touristParameterBarData} />
-                {latestMetric && <PerformanceChart latest={latestMetric} />}
+                <div className="pt-4">
+                  {latestMetric && <PerformanceChart latest={latestMetric} />}
+                </div>
                 {metrics.length > 0 && <MetricsChart metrics={metrics} />}
               </div>
             )}

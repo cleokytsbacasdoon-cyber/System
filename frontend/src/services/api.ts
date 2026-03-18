@@ -121,9 +121,9 @@ export const getDataQuality = async (): Promise<DataQuality> => {
 };
 
 // Demand Prediction APIs
-export const getDemandForecasts = async (): Promise<DemandForecast[]> => {
+export const getDemandForecasts = async (monthsAhead = 12): Promise<DemandForecast[]> => {
   if (USE_MOCK_API) return mockApi.getDemandForecasts();
-  const response = await apiClient.get('/forecasts');
+  const response = await apiClient.get('/forecasts', { params: { monthsAhead } });
   return response.data;
 };
 

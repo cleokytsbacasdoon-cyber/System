@@ -18,11 +18,18 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 interface MonthlyTouristArrivalsDataChartProps {
   forecasts: DemandForecast[];
   year: number;
+  years?: number[];
+  onYearChange?: (year: number) => void;
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDataChartProps> = ({ forecasts, year }) => {
+export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDataChartProps> = ({
+  forecasts,
+  year,
+  years = [],
+  onYearChange,
+}) => {
   const { isDarkMode } = useDarkMode();
 
   const monthlyActualTotals = useMemo(() => {
@@ -30,6 +37,8 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
 
     forecasts.forEach((entry) => {
       const entryDate = new Date(entry.date);
+      const isForecast = String(entry.id || '').startsWith('ml-f-') || String(entry.accommodationType || '').toLowerCase().includes('forecast');
+      if (isForecast) return;
       if (entryDate.getFullYear() !== year) return;
       totals[entryDate.getMonth()] += entry.actualOccupancy;
     });
@@ -89,12 +98,22 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
 
   return (
     <div className={`rounded-lg shadow p-4 md:p-6 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
-      <p className={`text-xl md:text-2xl font-bold text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
-        Monthly Tourist Arrivals Data
-      </p>
-      <p className={`text-sm text-center mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-        Actual data for {year}
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className={`text-xl md:text-2xl font-bold ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+          Monthly Tourist Arrivals Data
+        </p>
+        {onYearChange && years.length > 0 && (
+          <select
+            value={year}
+            onChange={(event) => onYearChange(Number(event.target.value))}
+            className={`p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+          >
+            {years.map((itemYear) => (
+              <option key={itemYear} value={itemYear}>{itemYear}</option>
+            ))}
+          </select>
+        )}
+      </div>
 
       <div className="h-72 md:h-80 mt-4">
         <Line data={chartData} options={chartOptions} />
