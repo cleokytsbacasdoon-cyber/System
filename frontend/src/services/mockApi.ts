@@ -143,6 +143,7 @@ const generateSampleJobs = (): RetrainingJob[] => [
   {
     id: uuidv4(),
     modelId: 'model-1',
+    modelName: 'model-1',
     status: 'completed',
     startTime: new Date(Date.now() - 7200000).toISOString(),
     endTime: new Date(Date.now() - 3600000).toISOString(),
@@ -151,18 +152,21 @@ const generateSampleJobs = (): RetrainingJob[] => [
   {
     id: uuidv4(),
     modelId: 'model-2',
+    modelName: 'model-2',
     status: 'running',
     startTime: new Date(Date.now() - 1800000).toISOString(),
   },
   {
     id: uuidv4(),
     modelId: 'model-3',
+    modelName: 'model-3',
     status: 'pending',
     startTime: new Date().toISOString(),
   },
   {
     id: uuidv4(),
     modelId: 'model-4',
+    modelName: 'model-4',
     status: 'completed',
     startTime: new Date(Date.now() - 10800000).toISOString(),
     endTime: new Date(Date.now() - 9000000).toISOString(),
@@ -480,6 +484,7 @@ export const mockApi = {
     const newJob: RetrainingJob = {
       id: uuidv4(),
       modelId,
+      modelName: modelId,
       status: 'pending',
       startTime: new Date().toISOString(),
     };

@@ -1,9 +1,13 @@
 import axios from 'axios';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel, MonthlyRetrainRequest } from '../types';
 import { mockApi } from './mockApi';
 
 // Backend-first by default. Set VITE_USE_MOCK_API=true to force local mock mode.
 const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === 'true';
+
+if (USE_MOCK_API) {
+  throw new Error('Mock API mode is disabled in this environment. Use backend APIs only.');
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
@@ -59,6 +63,21 @@ export const startRetrainingJob = async (modelId: string): Promise<RetrainingJob
 export const getRetrainingJobStatus = async (jobId: string): Promise<RetrainingJob> => {
   if (USE_MOCK_API) return mockApi.getRetrainingJobStatus(jobId);
   const response = await apiClient.get(`/retraining/jobs/${jobId}`);
+  return response.data;
+};
+
+export const simulateMonthlyRetraining = async (payload: MonthlyRetrainRequest): Promise<{ model: TrainedModel }> => {
+  const response = await apiClient.post('/ml/retrain/simulate-monthly', payload);
+  return response.data;
+};
+
+export const getTrainedModels = async (): Promise<TrainedModel[]> => {
+  const response = await apiClient.get('/ml/trained-models');
+  return response.data;
+};
+
+export const useTrainedModel = async (modelId: string): Promise<TrainedModel> => {
+  const response = await apiClient.post(`/ml/trained-models/${modelId}/use`);
   return response.data;
 };
 

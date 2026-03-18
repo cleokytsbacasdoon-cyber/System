@@ -1,0 +1,31 @@
+{
+  "modelVersion": "xgboost_base_march_2026",
+  "baseModelName": "xgboost_base",
+  "algorithm": "xgboost",
+  "cutoffYear": 2026,
+  "cutoffMonth": 3,
+  "trainedAtUtc": "2026-03-18T06:59:07.006706Z",
+  "datasetPath": "/app/db/dataset.csv",
+  "modelPath": "/app/models/xgboost_base_march_2026.json",
+  "featureOrder": [
+    "year",
+    "month",
+    "peak_season",
+    "philippine_holidays",
+    "top10market_holidays",
+    "avg_hightemp",
+    "avg_lowtemp",
+    "precipitation",
+    "inflation_rate",
+    "is_december",
+    "is_lockdown"
+  ],
+  "target": "arrivals",
+  "metrics": {
+    "mae_train": 5.953434308369954,
+    "rmse_train": 8.450685542762107,
+    "mape_train": 0.1607447035172937,
+    "r2_train": 0.9999999138915131,
+    "rowCount": 120
+  }
+}

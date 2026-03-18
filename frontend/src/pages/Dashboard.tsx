@@ -1,28 +1,26 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { RetrainingJobCard } from '../components/RetrainingJobCard';
 import { MetricsChart } from '../components/MetricsChart';
 import { PerformanceChart } from '../components/PerformanceChart';
-import { RetrainingStats } from '../components/RetrainingStats';
-import { DataExport } from '../components/DataExport';
 import { TouristForecastTrendChart } from '../components/TouristForecastTrendChart';
 import { MonthlyTouristArrivalsDataChart } from '../components/MonthlyTouristArrivalsDataChart';
 import { TouristParametersBarChart } from '../components/TouristParametersBarChart';
 import { 
   getModelMetrics, 
   getDriftAlerts, 
-  getRetrainingJobs, 
   getAPIEndpoints,
   getDemandForecasts,
   getDataQuality,
   getMonthlyTourismDataset,
   getTop10MarketHolidays,
-  startRetrainingJob,
   getPhilippineHolidays,
+  getTrainedModels,
+  useTrainedModel,
+  simulateMonthlyRetraining,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, RetrainingJob, APIEndpoint, DemandForecast, DataQuality, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord } from '../types';
+import { ModelMetrics, DriftAlert, APIEndpoint, DemandForecast, DataQuality, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -35,6 +33,13 @@ interface TouristTrendParameter {
   endpointId?: string;
   statusLabel: string;
   note?: string;
+}
+
+interface NotificationItem {
+  id: string;
+  title: string;
+  description: string;
+  timestamp: string;
 }
 
 type DashboardIconName =
@@ -143,30 +148,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const [metrics, setMetrics] = useState<ModelMetrics[]>([]);
   const [alerts, setAlerts] = useState<DriftAlert[]>([]);
-  const [jobs, setJobs] = useState<RetrainingJob[]>([]);
   const [endpoints, setEndpoints] = useState<APIEndpoint[]>([]);
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
   const [monthlyTourismData, setMonthlyTourismData] = useState<MonthlyTourismDatasetRecord[]>([]);
   const [top10MarketHolidayData, setTop10MarketHolidayData] = useState<Top10MarketHolidayRecord[]>([]);
+  const [trainedModels, setTrainedModels] = useState<TrainedModel[]>([]);
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [selectedApiParameter, setSelectedApiParameter] = useState<string | null>(null);
-  const [viewDate, setViewDate] = useState(new Date());
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | null>(null);
-  const [philippineHolidays, setPhilippineHolidays] = useState<PhilippineHoliday[]>([]);
   const [dashboardHolidayCountApi, setDashboardHolidayCountApi] = useState<number | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const [readAlertIds, setReadAlertIds] = useState<string[]>([]);
-  const [inflationRateInput, setInflationRateInput] = useState('3.2');
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
+  const [backendApiConnected, setBackendApiConnected] = useState(false);
+  const [baseModelNameInput, setBaseModelNameInput] = useState('xgboost_base');
+  const [simulateMonth, setSimulateMonth] = useState(new Date().getMonth() + 1);
+  const [simulateYear, setSimulateYear] = useState(new Date().getFullYear());
+  const [isSimulating, setIsSimulating] = useState(false);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
+  const knownAlertIdsRef = useRef<Set<string>>(new Set());
+  const previousEndpointStatusRef = useRef<Map<string, APIEndpoint['status']>>(new Map());
+  const previousMonthlyRowsCountRef = useRef<number | null>(null);
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
   const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);
+  const normalizedBaseModelName = useMemo(
+    () =>
+      (baseModelNameInput || 'xgboost_base')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'xgboost_base',
+    [baseModelNameInput]
+  );
+  const generatedModelNamePreview = useMemo(
+    () => `${normalizedBaseModelName}_${months[simulateMonth - 1].toLowerCase()}_${simulateYear}`,
+    [months, normalizedBaseModelName, simulateMonth, simulateYear]
+  );
 
   useEffect(() => {
     const clockTimer = setInterval(() => {
@@ -179,25 +202,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [metricsData, alertsData, jobsData, endpointsData, forecastsData, qualityData, monthlyTourismDataset, top10MarketHolidayDataset] = await Promise.all([
+      const [metricsData, alertsData, endpointsData, forecastsData, qualityData, monthlyTourismDataset, top10MarketHolidayDataset, trainedModelsData] = await Promise.all([
         getModelMetrics(),
         getDriftAlerts(),
-        getRetrainingJobs(),
         getAPIEndpoints(),
         getDemandForecasts(),
         getDataQuality(),
         getMonthlyTourismDataset(),
         getTop10MarketHolidays(),
+        getTrainedModels(),
       ]);
       setMetrics(metricsData);
       setAlerts(alertsData);
-      setJobs(jobsData);
       setEndpoints(endpointsData);
       setForecasts(forecastsData);
       setMonthlyTourismData(monthlyTourismDataset);
       setTop10MarketHolidayData(top10MarketHolidayDataset);
+      setTrainedModels(trainedModelsData);
       setDataQuality(qualityData);
+      setBackendApiConnected(true);
     } catch (err) {
+      setBackendApiConnected(false);
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
     } finally {
       setLoading(false);
@@ -265,35 +290,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return moveable[`${month}-${day}`] || holidayMap[`${month}-${day}`] || null;
   };
 
-  const handleStartRetraining = async (modelId: string) => {
+  const handleSimulateMonthlyRetraining = async () => {
     try {
-      const newJob = await startRetrainingJob(modelId);
-      setJobs([newJob, ...jobs]);
-      addToast('Retraining job started', 'success');
+      setIsSimulating(true);
+      await simulateMonthlyRetraining({
+        baseModelName: baseModelNameInput,
+        month: simulateMonth,
+        year: simulateYear,
+      });
+      addToast('Monthly XGBoost retraining simulation completed', 'success');
+      await loadData();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to start retraining', 'error');
+      addToast(err instanceof Error ? err.message : 'Failed to run monthly retraining simulation', 'error');
+    } finally {
+      setIsSimulating(false);
     }
   };
 
-  const handleApiParameterAction = (parameter: string) => {
-    setSelectedApiParameter(parameter);
-    addToast(`Showing details for ${parameter}`, 'success');
+  const handleUseModel = async (modelId: string) => {
+    try {
+      await useTrainedModel(modelId);
+      addToast('Selected model is now in use', 'success');
+      await loadData();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to switch active model', 'error');
+    }
   };
 
   const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
-  const firstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
-
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newDate = new Date(viewDate);
-    newDate.setMonth(parseInt(e.target.value, 10));
-    setViewDate(newDate);
-  };
-
-  const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newDate = new Date(viewDate);
-    newDate.setFullYear(parseInt(e.target.value, 10));
-    setViewDate(newDate);
-  };
 
   const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = parseInt(e.target.value, 10);
@@ -311,25 +335,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     });
   };
 
-  useEffect(() => {
-    const targetYear = viewDate.getFullYear();
-    const targetMonth = viewDate.getMonth() + 1;
-
-    getPhilippineHolidays(targetYear, targetMonth)
-      .then((items) => setPhilippineHolidays(items))
-      .catch(() => {
-        setPhilippineHolidays([]);
-      });
-  }, [viewDate]);
-
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
-  const latestThreeAlerts = useMemo(
-    () => [...alerts].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 3),
-    [alerts]
+  const addNotification = useCallback((item: NotificationItem) => {
+    setNotifications((prev) => [item, ...prev.filter((existing) => existing.id !== item.id)].slice(0, 20));
+  }, []);
+
+  const deriveAlertTitle = useCallback((alert: DriftAlert) => {
+    if (alert.title && alert.title.trim()) return alert.title.trim();
+
+    const messageLower = String(alert.message || '').toLowerCase();
+    if (alert.alertType === 'drift' || messageLower.includes('drift')) return 'Drift Detected';
+    if (messageLower.includes('disconnect')) return 'Disconnected';
+    if (messageLower.includes('connect')) return 'Connected';
+    return 'Problem Detected';
+  }, []);
+
+  const notificationItems = useMemo(
+    () => [...notifications].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 20),
+    [notifications]
   );
+
   const unreadNotifications = useMemo(
-    () => latestThreeAlerts.filter((alert) => !readAlertIds.includes(alert.id)),
-    [latestThreeAlerts, readAlertIds]
+    () => notificationItems.filter((item) => !readNotificationIds.includes(item.id)),
+    [notificationItems, readNotificationIds]
   );
   const latestForecast = useMemo(
     () => (forecasts.length > 0 ? forecasts[forecasts.length - 1] : null),
@@ -452,19 +480,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [dashboardMonth, dashboardYear]);
 
   const bestModelUsed = useMemo(() => {
-    const completed = jobs.filter((job) => job.status === 'completed');
-    if (completed.length === 0) return 'N/A';
-    const best = completed.reduce((currentBest, job) => {
-      const currentAccuracy = currentBest.accuracy ?? 0;
-      const nextAccuracy = job.accuracy ?? 0;
-      return nextAccuracy > currentAccuracy ? job : currentBest;
-    }, completed[0]);
-    return best.modelId;
-  }, [jobs]);
-  const uniqueModelIds = useMemo(() => {
-    const unique = Array.from(new Set(jobs.map((job) => job.modelId))).filter(Boolean);
-    return unique.sort();
-  }, [jobs]);
+    const active = trainedModels.find((model) => model.inUse);
+    return active?.modelName || 'xgboost_base';
+  }, [trainedModels]);
   const submissionRate = useMemo(() => {
     if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
     return 'N/A';
@@ -492,15 +510,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
     return holidayCount;
   }, [dashboardHolidayCountApi, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
-
-  const holidayNameByDay = useMemo(() => {
-    return philippineHolidays.reduce<Record<number, string>>((acc, holiday) => {
-      if (holiday.month === viewDate.getMonth() + 1 && holiday.day >= 1) {
-        acc[holiday.day] = holiday.name;
-      }
-      return acc;
-    }, {});
-  }, [philippineHolidays, viewDate]);
 
   // Weather data fetched from Open-Meteo API (falls back to climatological averages)
   const [weatherData, setWeatherData] = useState<MonthlyWeather | null>(null);
@@ -537,7 +546,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return dashboardMonth === 11 ? 1 : 0;
   }, [dashboardMonth, selectedMonthlyTourismRecord]);
   const isLockdown: number = selectedMonthlyTourismRecord?.isLockdown ? 1 : 0;
-  const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? (Number(inflationRateInput) || 0);
+  const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? 0;
   const top10MarketHolidaySummary = useMemo(() => {
     if (top10MarketHolidayForSelectedMonth.length === 0) {
       return 'No Top10MH records for selected month';
@@ -641,7 +650,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     dashboardHolidayCountApi,
     dashboardMonthLabel,
     endpoints,
-    inflationRateInput,
     inflationRateValue,
     isDecember,
     isLockdown,
@@ -682,68 +690,110 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     ]
   );
 
-  const historicalDatasetRows = useMemo(
-    () => monthlyTourismData.filter((row) => row.year >= 2016 && row.year <= 2025),
-    [monthlyTourismData]
-  );
-
-  const selectedParameterDetails = useMemo(() => {
-    if (!selectedApiParameter) {
-      return [] as string[];
-    }
-
-    if (selectedApiParameter === 'Peak Season') {
-      return [
-        `Dataset coverage: 2016-2025 (${historicalDatasetRows.length} monthly records).`,
-        `Peak-season months in DB: ${peakSeasonMonthsForYear.length > 0 ? peakSeasonMonthsForYear.join(', ') : 'None'}.`,
-        '2026 onward: values can be updated from API or manual input.',
-      ];
-    }
-
-    if (selectedApiParameter === 'Top 10 Market Holidays') {
-      return [
-        `Selected month records: ${top10MarketHolidayForSelectedMonth.length} entries.`,
-        `Top countries snapshot: ${top10MarketHolidaySummary}.`,
-        'Source file: backend/db/top10_market_holidays.csv (2016-2025).',
-        '2026 onward: values can be updated through API or manual input.',
-      ];
-    }
-
-    if (selectedApiParameter === 'Philippine Holidays') {
-      return [
-        `Dataset holiday count this month: ${currentMonthHolidayCount}.`,
-        `Data years in DB: 2016-2025; selected view: ${dashboardMonthLabel}.`,
-        '2026 onward: Calendarific API or manual input.',
-      ];
-    }
-
-    const totalTouristsAcrossHistory = historicalDatasetRows.reduce((sum, row) => sum + row.arrivals, 0);
-    return [
-      `Dataset coverage: 2016-2025 (${historicalDatasetRows.length} monthly records).`,
-      `Total tourists in dataset: ${totalTouristsAcrossHistory.toLocaleString()}.`,
-      `Selected month total tourists: ${(selectedDashboardData?.total ?? 0).toLocaleString()}.`,
-      '2026 onward: API-connected values and manual inputs are used when DB data is unavailable.',
-    ];
-  }, [
-    currentMonthHolidayCount,
-    dashboardMonthLabel,
-    historicalDatasetRows,
-    peakSeasonMonthsForYear,
-    selectedApiParameter,
-    selectedDashboardData,
-    top10MarketHolidayForSelectedMonth.length,
-    top10MarketHolidaySummary,
-  ]);
-
   const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [...tabs];
   const activeSectionLabel = activeTab === 'about'
     ? 'About the System'
     : navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
+  const systemApiChecks = useMemo(() => {
+    const now = new Date().toISOString();
+    const baseRows: Array<{ id: string; name: string; url: string; status: 'active' | 'inactive'; responseTime: number; lastCheck: string }> = [
+      { id: 'api-health', name: 'Backend Health', url: '/api/health', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-forecasts', name: 'Forecasts API', url: '/api/forecasts', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-model-status', name: 'Model Status API', url: '/api/ml/model/status', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-trained-models', name: 'Trained Models API', url: '/api/ml/trained-models', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-retraining-jobs', name: 'Retraining Jobs API', url: '/api/retraining/jobs', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-endpoints', name: 'API Endpoints API', url: '/api/api/endpoints', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-monthly-dataset', name: 'Monthly Dataset API', url: '/api/datasets/tourism/monthly', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-top10-holidays', name: 'Top 10 Market Holidays API', url: '/api/datasets/tourism/top10-market-holidays', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+      { id: 'api-ph-holidays', name: 'Philippine Holidays API', url: '/api/holidays/philippines', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
+    ];
+
+    const byName = new Map(endpoints.map((endpoint) => [endpoint.name.toLowerCase(), endpoint]));
+
+    const mergedBase = baseRows.map((row) => {
+      const fromBackend = byName.get(row.name.toLowerCase());
+      if (!fromBackend) return row;
+
+      return {
+        ...row,
+        status: fromBackend.status,
+        responseTime: fromBackend.responseTime,
+        lastCheck: fromBackend.lastCheck,
+      };
+    });
+
+    const existingIds = new Set(mergedBase.map((row) => row.id));
+    const remainingBackendRows = endpoints
+      .filter((endpoint) => !existingIds.has(endpoint.id))
+      .map((endpoint) => ({
+        id: endpoint.id,
+        name: endpoint.name,
+        url: endpoint.url,
+        status: endpoint.status,
+        responseTime: endpoint.responseTime,
+        lastCheck: endpoint.lastCheck,
+      }));
+
+    return [...mergedBase, ...remainingBackendRows];
+  }, [backendApiConnected, endpoints]);
+
   useEffect(() => {
-    if (!isNotificationOpen || latestThreeAlerts.length === 0) return;
-    setReadAlertIds((prev) => Array.from(new Set([...prev, ...latestThreeAlerts.map((alert) => alert.id)])));
-  }, [isNotificationOpen, latestThreeAlerts]);
+    const sortedAlerts = [...alerts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    for (const alert of sortedAlerts) {
+      if (knownAlertIdsRef.current.has(alert.id)) continue;
+      knownAlertIdsRef.current.add(alert.id);
+
+      if (alert.resolved) continue;
+      addNotification({
+        id: `alert-${alert.id}`,
+        title: deriveAlertTitle(alert),
+        description: alert.message,
+        timestamp: alert.timestamp,
+      });
+    }
+  }, [addNotification, alerts, deriveAlertTitle]);
+
+  useEffect(() => {
+    const previousStatuses = previousEndpointStatusRef.current;
+
+    for (const endpoint of endpoints) {
+      const previous = previousStatuses.get(endpoint.id);
+      if (previous && previous !== endpoint.status) {
+        const connected = endpoint.status === 'active';
+        addNotification({
+          id: `endpoint-${endpoint.id}-${endpoint.lastCheck}-${endpoint.status}`,
+          title: connected ? 'Connected' : 'Disconnected',
+          description: `${endpoint.name} is now ${connected ? 'connected' : 'disconnected'}.`,
+          timestamp: endpoint.lastCheck || new Date().toISOString(),
+        });
+      }
+      previousStatuses.set(endpoint.id, endpoint.status);
+    }
+  }, [addNotification, endpoints]);
+
+  useEffect(() => {
+    const previousCount = previousMonthlyRowsCountRef.current;
+    const currentCount = monthlyTourismData.length;
+
+    if (previousCount !== null && currentCount > previousCount) {
+      const addedRows = currentCount - previousCount;
+      addNotification({
+        id: `data-detected-${currentCount}`,
+        title: 'New Data Detected',
+        description: `${addedRows} new dataset record${addedRows > 1 ? 's were' : ' was'} detected in monthly tourism data.`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    previousMonthlyRowsCountRef.current = currentCount;
+  }, [addNotification, monthlyTourismData.length]);
+
+  useEffect(() => {
+    if (!isNotificationOpen || notificationItems.length === 0) return;
+    setReadNotificationIds((prev) => Array.from(new Set([...prev, ...notificationItems.map((item) => item.id)])));
+  }, [isNotificationOpen, notificationItems]);
 
   useEffect(() => {
     if (!isNotificationOpen) return;
@@ -820,18 +870,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     </div>
                   </div>
                   <div className="max-h-80 overflow-y-auto p-3 space-y-2">
-                    {latestThreeAlerts.length > 0 ? latestThreeAlerts.map((alert) => (
+                    {notificationItems.length > 0 ? notificationItems.map((item) => (
                       <div
-                        key={alert.id}
+                        key={item.id}
                         className={`rounded-lg border px-3 py-2 ${isDarkMode ? 'border-slate-700 bg-slate-800' : 'border-gray-200 bg-gray-50'}`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium">{alert.title || 'Alert Notification'}</p>
-                          {!readAlertIds.includes(alert.id) && <span className="mt-1 h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" />}
+                          <p className="text-sm font-medium">{item.title}</p>
+                          {!readNotificationIds.includes(item.id) && <span className="mt-1 h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" />}
                         </div>
-                        <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{alert.message}</p>
+                        <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{item.description}</p>
                         <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          {new Date(alert.timestamp).toLocaleString()}
+                          {new Date(item.timestamp).toLocaleString()}
                         </p>
                       </div>
                     )) : (
@@ -1085,158 +1135,156 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
-                    <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Configured Models</p>
-                    <p className="mt-1 text-2xl font-bold text-sky-500">{uniqueModelIds.length}</p>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Configured Algorithm</p>
+                    <p className="mt-1 text-2xl font-bold text-sky-500">XGBoost</p>
                     <p className={`mt-1 text-sm break-all ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      {uniqueModelIds.length > 0 ? uniqueModelIds.join(', ') : 'No models loaded yet'}
+                      Monthly retraining simulation is limited to XGBoost models.
                     </p>
                   </div>
+
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
-                    <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                      Inflation Rate Input (%)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={inflationRateInput}
-                      onChange={(e) => setInflationRateInput(e.target.value)}
-                      className={`mt-2 w-full md:w-64 p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                    />
-                  </div>
-
-                  <RetrainingStats jobs={jobs} />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mt-6">
-                    {jobs.map(job => <RetrainingJobCard key={job.id} job={job} onRetrain={handleStartRetraining} />)}
-                  </div>
-                </div>
-
-                <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
-                  <h2 className="text-2xl font-bold mb-4">Parameters</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
-                    {touristTrendParameters.map((parameter) => {
-                      return (
-                        <div
-                          key={parameter.label}
-                          className={`rounded-lg border px-4 py-3 ${
-                            isDarkMode ? 'bg-slate-900 border-slate-700 text-gray-100' : 'bg-gray-50 border-gray-200 text-gray-700'
-                          }`}
+                    <h3 className="text-lg font-semibold mb-2">Monthly Auto-Retraining Simulator (XGBoost)</h3>
+                    <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Choose a base model and cutoff date. Training will use all rows from the oldest record up to the selected month and year.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div>
+                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Base Model Name</label>
+                        <input
+                          type="text"
+                          value={baseModelNameInput}
+                          onChange={(e) => setBaseModelNameInput(e.target.value)}
+                          placeholder="xgboost_base"
+                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Month</label>
+                        <select
+                          value={simulateMonth}
+                          onChange={(e) => setSimulateMonth(Number(e.target.value))}
+                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
                         >
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div>
-                              <p className="font-semibold">{parameter.label}</p>
-                              <p className={`text-sm mt-1 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                                {parameter.value}
-                              </p>
-                              <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                {parameter.statusLabel}
-                              </p>
-                              {parameter.note && (
-                                <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                                  {parameter.note}
-                                </p>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => handleApiParameterAction(parameter.label)}
-                              className="px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 text-sm"
-                            >
-                              Show Details
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          {months.map((monthName, index) => (
+                            <option key={monthName} value={index + 1}>{monthName}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Year</label>
+                        <input
+                          type="number"
+                          value={simulateYear}
+                          onChange={(e) => setSimulateYear(Number(e.target.value))}
+                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          onClick={handleSimulateMonthlyRetraining}
+                          disabled={isSimulating}
+                          className="w-full px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 disabled:opacity-60"
+                        >
+                          {isSimulating ? 'Training...' : 'Train XGBoost'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className={`mt-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                      <p className="text-xs">Generated model name</p>
+                      <p className="text-sm font-semibold break-all">{generatedModelNamePreview}</p>
+                    </div>
                   </div>
 
-                  {selectedApiParameter === 'Philippine Holidays' && (
-                    <div className="space-y-4">
-                      <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                        <h3 className="text-lg font-bold">Show Details: Philippine Holidays</h3>
-                        <div className="mt-3 space-y-1">
-                          {selectedParameterDetails.map((detail) => (
-                            <p key={detail} className={`text-sm ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                              {detail}
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b pb-4 border-gray-200 dark:border-slate-700">
-                          <h3 className="text-xl font-bold">Philippine Holidays Calendar</h3>
-                          <div className="flex gap-2">
-                            <select
-                              value={viewDate.getMonth()}
-                              onChange={handleMonthChange}
-                              className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                            >
-                              {months.map((month, i) => <option key={month} value={i}>{month}</option>)}
-                            </select>
-                            <select
-                              value={viewDate.getFullYear()}
-                              onChange={handleYearChange}
-                              className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                            >
-                              {years.map(year => <option key={year} value={year}>{year}</option>)}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-7 gap-2 mt-4">
-                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                            <div key={day} className="text-center font-bold text-sm py-2 opacity-60 uppercase">{day}</div>
-                          ))}
-
-                          {[...Array(firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => (
-                            <div key={`empty-${i}`} className="min-h-[90px]"></div>
-                          ))}
-
-                          {[...Array(daysInMonth(viewDate.getFullYear(), viewDate.getMonth()))].map((_, i) => {
-                            const day = i + 1;
-                            const holiday = holidayNameByDay[day] || getPHHoliday(day, viewDate.getMonth(), viewDate.getFullYear());
-                            const isSunday = (day + firstDayOfMonth(viewDate.getFullYear(), viewDate.getMonth())) % 7 === 1;
-
-                            return (
-                              <div
-                                key={day}
-                                className={`min-h-[90px] p-2 rounded border transition-colors ${
-                                  isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
-                                } ${holiday ? 'border-red-400 bg-red-500/5' : ''}`}
-                              >
-                                <span className={`text-sm font-bold ${holiday || isSunday ? 'text-red-500' : ''}`}>{day}</span>
-                                {holiday && (
-                                  <div className="mt-2">
-                                    <span className="text-[10px] leading-tight font-bold bg-red-500 text-white px-1 py-1 rounded block text-center uppercase">
-                                      {holiday}
-                                    </span>
-                                  </div>
+                  <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold">Trained Models Registry</h3>
+                      <button
+                        onClick={loadData}
+                        className="px-3 py-1 text-xs bg-slate-600 text-white rounded hover:bg-slate-700"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className={isDarkMode ? 'border-b border-slate-700 text-gray-300' : 'border-b border-gray-200 text-gray-600'}>
+                            <th className="text-left py-2 pr-3">Model Name</th>
+                            <th className="text-left py-2 pr-3">Date Created</th>
+                            <th className="text-left py-2 pr-3">Accuracy</th>
+                            <th className="text-left py-2 pr-3">In Use</th>
+                            <th className="text-left py-2">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trainedModels.map((model) => (
+                            <tr key={model.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
+                              <td className="py-2 pr-3 font-medium">{model.modelName}</td>
+                              <td className="py-2 pr-3">{new Date(model.createdAt).toLocaleString()}</td>
+                              <td className="py-2 pr-3">{typeof model.accuracy === 'number' ? `${(model.accuracy * 100).toFixed(2)}%` : '—'}</td>
+                              <td className="py-2 pr-3">
+                                {model.inUse ? (
+                                  <span className="px-2 py-1 rounded bg-green-600 text-white text-xs">IN USE</span>
+                                ) : (
+                                  <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>No</span>
                                 )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                              </td>
+                              <td className="py-2">
+                                <button
+                                  onClick={() => handleUseModel(model.id)}
+                                  disabled={model.inUse}
+                                  className="px-3 py-1 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-60"
+                                >
+                                  {model.inUse ? 'Active' : 'Use'}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  )}
-
-                  {selectedApiParameter && selectedApiParameter !== 'Philippine Holidays' && (
-                    <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                      <h3 className="text-lg font-bold">Show Details: {selectedApiParameter}</h3>
-                      <div className="mt-3 space-y-1">
-                        {selectedParameterDetails.map((detail) => (
-                          <p key={detail} className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                            {detail}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                    {trainedModels.length === 0 && (
+                      <p className={`mt-3 text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        No trained XGBoost models found yet. Run training first.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
-                  <h2 className="text-2xl font-bold mb-4">Export Data</h2>
-                  <DataExport metrics={metrics} alerts={alerts} jobs={jobs} endpoints={endpoints} />
+                  <h2 className="text-2xl font-bold mb-4">Parameters (API Health Checks)</h2>
+                  <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className={isDarkMode ? 'border-b border-slate-700 text-gray-300' : 'border-b border-gray-200 text-gray-600'}>
+                            <th className="text-left py-2 pr-3">API</th>
+                            <th className="text-left py-2 pr-3">URL</th>
+                            <th className="text-left py-2 pr-3">Response (ms)</th>
+                            <th className="text-left py-2 pr-3">Last Check</th>
+                            <th className="text-left py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {systemApiChecks.map((endpoint) => (
+                            <tr key={endpoint.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
+                              <td className="py-2 pr-3 font-medium">{endpoint.name}</td>
+                              <td className="py-2 pr-3">{endpoint.url}</td>
+                              <td className="py-2 pr-3">{endpoint.responseTime > 0 ? endpoint.responseTime : '—'}</td>
+                              <td className="py-2 pr-3">{new Date(endpoint.lastCheck).toLocaleString()}</td>
+                              <td className="py-2">
+                                <span className="inline-flex items-center gap-2 text-sm">
+                                  <span className={`h-2.5 w-2.5 rounded-full ${endpoint.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`} />
+                                  <span>{endpoint.status === 'active' ? 'Connected' : 'Disconnected'}</span>
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             )}

@@ -22,7 +22,8 @@ export interface DemandAlert {
 
 export interface RetrainingJob {
   id: string;
-  modelId: string;
+  modelId?: string;
+  modelName: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   startTime: string;
   endTime?: string;
@@ -122,6 +123,21 @@ export interface DashboardData {
   demandAlerts: DemandAlert[];
   retrainingJobs: RetrainingJob[];
   apiEndpoints: APIEndpoint[];
+}
+
+export interface TrainedModel {
+  id: string;
+  modelName: string;
+  createdAt: string;
+  accuracy?: number;
+  inUse: boolean;
+  algorithm: 'XGBoost';
+}
+
+export interface MonthlyRetrainRequest {
+  baseModelName: string;
+  year: number;
+  month: number;
 }
 
 // Type aliases for Dashboard compatibility

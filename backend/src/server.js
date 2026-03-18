@@ -8,6 +8,7 @@ const path = require('path');
 dotenv.config();
 
 const { query } = require('./db');
+const { getModelStatus, retrainLocalModel, buildForecastSeries } = require('./ml/tourismModelService');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -39,6 +40,7 @@ const mapDemandAlert = (row) => ({
 const mapRetrainingJob = (row) => ({
   id: row.id,
   modelId: row.model_id,
+  modelName: row.model_id,
   status: row.status,
   startTime: row.start_time,
   endTime: row.end_time,
@@ -118,6 +120,45 @@ const mapMonthlyTourismDataset = (row) => ({
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
 const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/top10_market_holidays.csv');
+const MODEL_STORAGE_DIR = process.env.ML_MODEL_DIR
+  ? path.resolve(__dirname, '..', process.env.ML_MODEL_DIR)
+  : path.resolve(__dirname, '../models');
+
+const MONTH_NAMES = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+];
+
+const sanitizeModelName = (value) =>
+  String(value || 'xgboost_base')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'xgboost_base';
+
+const monthNumberToName = (monthNumber) => MONTH_NAMES[Number(monthNumber) - 1] || 'month';
+
+const resolveModelFileByVersion = (version) => path.resolve(MODEL_STORAGE_DIR, `${version}.json`);
+const resolveMetadataFileByVersion = (version) => path.resolve(MODEL_STORAGE_DIR, `${version}_metadata.json`);
+
+const toTrainingPayloadRow = (row) => {
+  const top10MarketHolidaysValue = Number(row.top_10_market_holidays);
+
+  return {
+    Year: Number(row.year),
+    Month: monthNumberToName(row.month),
+    Arrivals: Number(row.arrivals),
+    Peak_Season: row.is_peak_season ? 1 : 0,
+    Philippine_Holidays: Number(row.philippine_holiday_count || 0),
+    Top10Market_Holidays: Number.isFinite(top10MarketHolidaysValue) ? top10MarketHolidaysValue : 0,
+    Avg_HighTemp: Number(row.avg_high_temp_c || 0),
+    Avg_LowTemp: Number(row.avg_low_temp_c || 0),
+    Precipitation: Number(row.precipitation_cm || 0),
+    Inflation_Rate: Number(row.inflation_rate || 0),
+    is_December: row.is_december ? 1 : 0,
+    is_Lockdown: row.is_lockdown ? 1 : 0,
+  };
+};
 
 const readTop10MarketHolidaysFromCsv = () => {
   const raw = fs.readFileSync(TOP10_MARKET_HOLIDAYS_CSV_PATH, 'utf8').trim();
@@ -199,7 +240,9 @@ app.put('/api/alerts/demand/:id/resolve', async (req, res, next) => {
 
 app.get('/api/retraining/jobs', async (_req, res, next) => {
   try {
-    const result = await query('SELECT * FROM retraining_jobs ORDER BY start_time DESC');
+    const result = await query(
+      "SELECT * FROM retraining_jobs WHERE model_id ILIKE 'xgboost%' ORDER BY start_time DESC"
+    );
     res.json(result.rows.map(mapRetrainingJob));
   } catch (error) {
     next(error);
@@ -208,13 +251,12 @@ app.get('/api/retraining/jobs', async (_req, res, next) => {
 
 app.post('/api/retraining/jobs', async (req, res, next) => {
   try {
-    const { modelId } = req.body;
-    if (!modelId) return res.status(400).json({ error: 'modelId is required' });
+    const modelName = sanitizeModelName(req.body?.modelName || req.body?.modelId || 'xgboost_base');
 
     const jobId = `job-${Date.now()}`;
     const result = await query(
       'INSERT INTO retraining_jobs (id, model_id, status, start_time) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [jobId, modelId, 'pending']
+      [jobId, modelName, 'pending']
     );
 
     res.status(201).json(mapRetrainingJob(result.rows[0]));
@@ -309,17 +351,229 @@ app.post('/api/models/versions/:id/rollback', async (req, res, next) => {
 app.get('/api/data/quality', async (_req, res, next) => {
   try {
     const result = await query('SELECT * FROM data_quality ORDER BY last_update DESC LIMIT 1');
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Data quality record not found' });
+    if (result.rowCount === 0) {
+      const datasetResult = await query('SELECT COUNT(*)::int AS total_rows FROM monthly_tourism_dataset');
+      const totalRows = Number(datasetResult.rows[0]?.total_rows || 0);
+
+      return res.json({
+        id: 'dq-computed',
+        completeness: totalRows > 0 ? 100 : 0,
+        schemaValid: true,
+        freshness: totalRows > 0 ? 100 : 0,
+        lastUpdate: new Date().toISOString(),
+        recordsProcessed: totalRows,
+      });
+    }
     res.json(mapDataQuality(result.rows[0]));
   } catch (error) {
     next(error);
   }
 });
 
-app.get('/api/forecasts', async (_req, res, next) => {
+app.get('/api/ml/model/status', async (_req, res, next) => {
   try {
+    const status = getModelStatus();
+    res.json(status);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ml/retrain', async (req, res, next) => {
+  try {
+    const result = await retrainLocalModel({
+      modelVersion: req.body?.modelVersion,
+      datasetPath: req.body?.datasetPath,
+      modelPath: req.body?.modelPath,
+      metadataPath: req.body?.metadataPath,
+    });
+
+    res.status(201).json({
+      message: 'Model retrained successfully.',
+      result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/ml/trained-models', async (_req, res, next) => {
+  try {
+    const result = await query(
+      "SELECT * FROM model_versions WHERE lower(version) LIKE 'xgboost%' ORDER BY deploy_date DESC"
+    );
+
+    const models = result.rows.map((row) => ({
+      id: row.id,
+      modelName: row.version,
+      createdAt: row.deploy_date,
+      accuracy: row.accuracy !== null ? Number(row.accuracy) : undefined,
+      inUse: row.status === 'active',
+      algorithm: 'XGBoost',
+    }));
+
+    res.json(models);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ml/trained-models/:id/use', async (req, res, next) => {
+  try {
+    const target = await query('SELECT * FROM model_versions WHERE id = $1', [req.params.id]);
+    if (target.rowCount === 0) {
+      return res.status(404).json({ error: 'Trained model not found' });
+    }
+
+    const version = target.rows[0].version;
+    const selectedModelFile = resolveModelFileByVersion(version);
+    const selectedMetadataFile = resolveMetadataFileByVersion(version);
+
+    const status = getModelStatus();
+    if (!fs.existsSync(selectedModelFile) || !fs.existsSync(selectedMetadataFile)) {
+      return res.status(400).json({
+        error: 'Model artifact files are missing',
+        details: { selectedModelFile, selectedMetadataFile },
+      });
+    }
+
+    fs.copyFileSync(selectedModelFile, status.localModelFile);
+    fs.copyFileSync(selectedMetadataFile, status.localMetadataFile);
+
+    await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'");
+    const updated = await query(
+      "UPDATE model_versions SET status = 'active', deploy_date = NOW() WHERE id = $1 RETURNING *",
+      [req.params.id]
+    );
+
+    res.json({
+      id: updated.rows[0].id,
+      modelName: updated.rows[0].version,
+      createdAt: updated.rows[0].deploy_date,
+      accuracy: updated.rows[0].accuracy !== null ? Number(updated.rows[0].accuracy) : undefined,
+      inUse: true,
+      algorithm: 'XGBoost',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ml/retrain/simulate-monthly', async (req, res, next) => {
+  try {
+    const baseModelName = sanitizeModelName(req.body?.baseModelName || 'xgboost_base');
+    const year = Number(req.body?.year);
+    const month = Number(req.body?.month);
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'year must be an integer between 2000 and 2100' });
+    }
+
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
+    }
+
+    const trainingRows = await query(
+      `SELECT *
+       FROM monthly_tourism_dataset
+       WHERE year < $1 OR (year = $1 AND month <= $2)
+       ORDER BY year, month`,
+      [year, month]
+    );
+
+    if (trainingRows.rowCount === 0) {
+      return res.status(400).json({ error: 'No dataset rows found up to the requested month/year' });
+    }
+
+    const monthName = monthNumberToName(month);
+    const modelVersion = `${baseModelName}_${monthName}_${year}`;
+    const modelPath = resolveModelFileByVersion(modelVersion);
+    const metadataPath = resolveMetadataFileByVersion(modelVersion);
+
+    const jobId = `job-${Date.now()}`;
+    await query(
+      'INSERT INTO retraining_jobs (id, model_id, status, start_time) VALUES ($1, $2, $3, NOW())',
+      [jobId, modelVersion, 'running']
+    );
+
+    const trainingPayloadRows = trainingRows.rows.map(toTrainingPayloadRow);
+
+    const result = await retrainLocalModel({
+      modelVersion,
+      modelPath,
+      metadataPath,
+      rows: trainingPayloadRows,
+      baseModelName,
+      cutoffYear: year,
+      cutoffMonth: month,
+    });
+
+    const maeTrain = Number(result?.metrics?.mae_train || 0);
+    const rmseTrain = Number(result?.metrics?.rmse_train || 0);
+    const mapeTrain = Number(result?.metrics?.mape_train || 0);
+    const r2Train = Number(result?.metrics?.r2_train || 0);
+    const accuracyValue = Math.max(0, Math.min(1, 1 - (mapeTrain / 100)));
+
+    const versionId = `mv-${Date.now()}`;
+    await query(
+      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
+       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived')`,
+      [versionId, modelVersion, accuracyValue, accuracyValue, accuracyValue]
+    );
+
+    await query(
+      `INSERT INTO forecast_metrics (id, mape, rmse, mae, r2_score, timestamp)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [`metric-${Date.now()}`, mapeTrain, rmseTrain, maeTrain, r2Train]
+    );
+
+    await query(
+      'UPDATE retraining_jobs SET status = $1, end_time = NOW(), accuracy = $2 WHERE id = $3',
+      ['completed', accuracyValue, jobId]
+    );
+
+    res.status(201).json({
+      message: 'Monthly simulation retraining completed',
+      model: {
+        id: versionId,
+        modelName: modelVersion,
+        createdAt: new Date().toISOString(),
+        accuracy: accuracyValue,
+        inUse: false,
+        algorithm: 'XGBoost',
+      },
+      training: {
+        baseModelName,
+        cutoffYear: year,
+        cutoffMonth: month,
+        rowCount: trainingRows.rowCount,
+      },
+      jobId,
+      result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/forecasts', async (req, res, next) => {
+  try {
+    const preferLegacy = String(req.query.source || '').toLowerCase() === 'legacy';
+
+    if (!preferLegacy) {
+      try {
+        const monthlyResult = await query('SELECT * FROM monthly_tourism_dataset ORDER BY year, month');
+        if (monthlyResult.rowCount > 0) {
+          const forecastSeries = await buildForecastSeries(monthlyResult.rows, 12);
+          return res.json(forecastSeries);
+        }
+      } catch (modelError) {
+        console.warn('Model-backed forecasts unavailable, using legacy forecasts:', modelError.message);
+      }
+    }
+
     const result = await query('SELECT * FROM demand_forecasts ORDER BY date DESC LIMIT 60');
-    res.json(result.rows.map(mapDemandForecast));
+    return res.json(result.rows.map(mapDemandForecast));
   } catch (error) {
     next(error);
   }
@@ -498,6 +752,29 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
 
     if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
       return res.status(400).json({ error: 'month must be between 1 and 12 when provided' });
+    }
+
+    // Prefer local dataset value for covered month entries to minimize external API calls.
+    if (month !== undefined) {
+      const localResult = await query(
+        `SELECT philippine_holiday_count
+         FROM monthly_tourism_dataset
+         WHERE year = $1 AND month = $2
+         LIMIT 1`,
+        [year, month]
+      );
+
+      if (localResult.rowCount > 0 && localResult.rows[0].philippine_holiday_count !== null) {
+        const count = Number(localResult.rows[0].philippine_holiday_count);
+        return res.json({
+          country: 'PH',
+          year,
+          month,
+          source: 'monthly_tourism_dataset',
+          count,
+          holidays: [],
+        });
+      }
     }
 
     const apiKey = process.env.CALENDARIFIC_API_KEY;

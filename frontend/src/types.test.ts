@@ -41,6 +41,7 @@ describe('Types - RetrainingJob', () => {
     const job: RetrainingJob = {
       id: '1',
       modelId: 'model-1',
+      modelName: 'model-1',
       status: 'running',
       startTime: '2026-02-25T10:30:00Z',
     };
@@ -52,6 +53,7 @@ describe('Types - RetrainingJob', () => {
     const job: RetrainingJob = {
       id: '1',
       modelId: 'model-1',
+      modelName: 'model-1',
       status: 'completed',
       startTime: '2026-02-25T10:30:00Z',
       endTime: '2026-02-25T11:30:00Z',

@@ -8,7 +8,9 @@
     "start": "node src/server.js",
     "db:init": "node src/scripts/initDb.js",
     "db:up": "docker compose up -d",
-    "db:down": "docker compose down"
+    "db:down": "docker compose down",
+    "ml:install": "python -m pip install -r src/scripts/ml/requirements.txt",
+    "ml:train": "python src/scripts/ml/train_tourism.py"
   },
   "dependencies": {
     "axios": "^1.13.2",
