@@ -247,45 +247,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     };
   }, [loadData]);
 
-  const getPHHoliday = (day: number, month: number, year: number) => {
-    const holidayMap: { [key: string]: string } = {
-      '0-1': "New Year's Day",
-      '0-2': 'Special Non-Working Day',
-      '1-25': 'EDSA Revolution Anniversary',
-      '3-9': 'Araw ng Kagitingan',
-      '4-1': 'Labor Day',
-      '5-12': 'Independence Day',
-      '7-21': 'Ninoy Aquino Day',
-      '7-25': 'National Heroes Day',
-      '10-1': "All Saints' Day",
-      '10-2': "All Souls' Day",
-      '10-30': 'Bonifacio Day',
-      '11-8': 'Immaculate Conception',
-      '11-24': 'Christmas Eve',
-      '11-25': 'Christmas Day',
-      '11-30': 'Rizal Day',
-      '11-31': "New Year's Eve",
-    };
-
-    const moveable: { [key: string]: string } = {};
-    if (year === 2024) {
-      if (month === 2 && day === 28) moveable[`${month}-${day}`] = 'Maundy Thursday';
-      if (month === 2 && day === 29) moveable[`${month}-${day}`] = 'Good Friday';
-    } else if (year === 2025) {
-      if (month === 3 && day === 17) moveable[`${month}-${day}`] = 'Maundy Thursday';
-      if (month === 3 && day === 18) moveable[`${month}-${day}`] = 'Good Friday';
-    } else if (year === 2026) {
-      if (month === 3 && day === 2) moveable[`${month}-${day}`] = 'Maundy Thursday';
-      if (month === 3 && day === 3) moveable[`${month}-${day}`] = 'Good Friday';
-      if (month === 3 && day === 4) moveable[`${month}-${day}`] = 'Black Saturday';
-    } else if (year === 2027) {
-      if (month === 2 && day === 25) moveable[`${month}-${day}`] = 'Maundy Thursday';
-      if (month === 2 && day === 26) moveable[`${month}-${day}`] = 'Good Friday';
-    }
-
-    return moveable[`${month}-${day}`] || holidayMap[`${month}-${day}`] || null;
-  };
-
   const handleSimulateMonthlyRetraining = async () => {
     try {
       setIsSimulating(true);
@@ -312,8 +273,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       addToast(err instanceof Error ? err.message : 'Failed to switch active model', 'error');
     }
   };
-
-  const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 
   const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = parseInt(e.target.value, 10);
@@ -447,25 +406,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [dashboardMonth, dashboardYear, monthlyTourismData]);
 
   const top10MarketHolidayForSelectedMonth = useMemo(() => {
-    const exactMonthYear = top10MarketHolidayData
+    return top10MarketHolidayData
       .filter((row) => row.year === dashboardYear && row.month === dashboardMonth + 1)
-      .sort((a, b) => a.rank - b.rank);
-
-    if (exactMonthYear.length > 0) {
-      return exactMonthYear;
-    }
-
-    const sameMonthRows = top10MarketHolidayData
-      .filter((row) => row.month === dashboardMonth + 1)
-      .sort((a, b) => b.year - a.year || a.rank - b.rank);
-
-    if (sameMonthRows.length === 0) {
-      return [];
-    }
-
-    const latestAvailableYear = sameMonthRows[0].year;
-    return sameMonthRows
-      .filter((row) => row.year === latestAvailableYear)
       .sort((a, b) => a.rank - b.rank);
   }, [dashboardMonth, dashboardYear, top10MarketHolidayData]);
 
@@ -501,22 +443,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       return dashboardHolidayCountApi;
     }
 
-    const year = dashboardYear;
-    const month = dashboardMonth;
+    return null;
+  }, [dashboardHolidayCountApi, selectedMonthlyTourismRecord]);
 
-    const totalDays = daysInMonth(year, month);
-    let holidayCount = 0;
-
-    for (let day = 1; day <= totalDays; day += 1) {
-      if (getPHHoliday(day, month, year)) {
-        holidayCount += 1;
-      }
-    }
-
-    return holidayCount;
-  }, [dashboardHolidayCountApi, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
-
-  // Weather data fetched from Open-Meteo API (falls back to climatological averages)
+  // Weather data fetched from Open-Meteo API
   const [weatherData, setWeatherData] = useState<MonthlyWeather | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   useEffect(() => {
@@ -526,14 +456,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       .finally(() => setWeatherLoading(false));
   }, [dashboardMonth, dashboardYear]);
 
-  // Fallback arrays used while loading or if API is unavailable
-  const FALLBACK_HIGH = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
-  const FALLBACK_LOW  = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
-  const FALLBACK_PREC = [7.2,  6.8,  5.9,  4.8,  9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
-
-  const monthHighTempC       = selectedMonthlyTourismRecord?.avgHighTempC ?? weatherData?.avgHighTemp        ?? FALLBACK_HIGH[dashboardMonth];
-  const monthLowTempC        = selectedMonthlyTourismRecord?.avgLowTempC ?? weatherData?.avgLowTemp         ?? FALLBACK_LOW[dashboardMonth];
-  const monthPrecipitationCm = selectedMonthlyTourismRecord?.precipitationCm ?? weatherData?.totalPrecipitation ?? FALLBACK_PREC[dashboardMonth];
+  const monthHighTempC = selectedMonthlyTourismRecord?.avgHighTempC ?? weatherData?.avgHighTemp ?? null;
+  const monthLowTempC = selectedMonthlyTourismRecord?.avgLowTempC ?? weatherData?.avgLowTemp ?? null;
+  const monthPrecipitationCm = selectedMonthlyTourismRecord?.precipitationCm ?? weatherData?.totalPrecipitation ?? null;
   const inflationRateValue = selectedMonthlyTourismRecord?.inflationRate ?? 0;
   const isPeakSeason = useMemo(() => {
     if (selectedMonthlyTourismRecord?.isPeakSeason !== null && selectedMonthlyTourismRecord?.isPeakSeason !== undefined) {
@@ -605,11 +530,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return [
       {
         label: 'Average High Temperature',
-        value: weatherLoading ? 'Loading…' : `${Number(monthHighTempC).toFixed(1)} °C`,
+        value: weatherLoading ? 'Loading…' : (monthHighTempC !== null ? `${Number(monthHighTempC).toFixed(1)} °C` : 'N/A'),
       },
       {
         label: 'Average Low Temperature',
-        value: weatherLoading ? 'Loading…' : `${Number(monthLowTempC).toFixed(1)} °C`,
+        value: weatherLoading ? 'Loading…' : (monthLowTempC !== null ? `${Number(monthLowTempC).toFixed(1)} °C` : 'N/A'),
       },
       {
         label: 'Top 10 Market Holidays',
@@ -619,7 +544,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Precipitation',
-        value: weatherLoading ? 'Loading…' : `${Number(monthPrecipitationCm).toFixed(1)} cm`,
+        value: weatherLoading ? 'Loading…' : (monthPrecipitationCm !== null ? `${Number(monthPrecipitationCm).toFixed(1)} cm` : 'N/A'),
       },
       {
         label: 'Inflation Rate',
@@ -639,7 +564,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Philippine Holidays',
-        value: `${currentMonthHolidayCount} holidays`,
+        value: currentMonthHolidayCount !== null ? `${currentMonthHolidayCount} holidays` : 'N/A',
       },
     ];
   }, [
@@ -664,11 +589,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   const touristParameterBarData = useMemo(
     () => [
-      { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC).toFixed(1)) },
-      { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC).toFixed(1)) },
-      { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm).toFixed(1)) },
+      { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC ?? 0).toFixed(1)) },
+      { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC ?? 0).toFixed(1)) },
+      { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm ?? 0).toFixed(1)) },
       { label: 'Inflation Rate (%)', value: Number(Number(inflationRateValue).toFixed(2)) },
-      { label: 'PH Holidays', value: currentMonthHolidayCount },
+      { label: 'PH Holidays', value: currentMonthHolidayCount ?? 0 },
       { label: 'Top 10 Market Holidays', value: top10MarketHolidayCount },
     ],
     [

@@ -11,16 +11,11 @@ const LATITUDE = 9.5728;
 const LONGITUDE = 123.7553;
 const TIMEZONE = 'Asia%2FManila';
 
-// Fallback values used when the API is unreachable
-const FALLBACK_HIGH = [30.6, 31.2, 32.0, 32.4, 33.1, 32.8, 31.9, 31.6, 31.5, 31.2, 30.9, 30.7];
-const FALLBACK_LOW  = [23.7, 24.0, 24.6, 25.1, 25.4, 25.2, 24.9, 24.8, 24.7, 24.5, 24.1, 23.9];
-const FALLBACK_PREC = [7.2,  6.8,  5.9,  4.8,  9.4, 14.7, 17.3, 16.2, 15.8, 18.1, 13.4, 10.2];
-
 export interface MonthlyWeather {
-  avgHighTemp: number;   // °C
-  avgLowTemp: number;    // °C
-  totalPrecipitation: number; // cm
-  source: 'api' | 'fallback';
+  avgHighTemp: number | null;   // °C
+  avgLowTemp: number | null;    // °C
+  totalPrecipitation: number | null; // cm
+  source: 'api' | 'unavailable';
 }
 
 function average(arr: number[]): number {
@@ -77,12 +72,12 @@ export async function fetchMonthlyWeather(
       source: 'api',
     };
   } catch {
-    // Silently fall back to climatological averages
+    // Return explicit unavailable state instead of synthetic fallback values.
     return {
-      avgHighTemp:        FALLBACK_HIGH[month],
-      avgLowTemp:         FALLBACK_LOW[month],
-      totalPrecipitation: FALLBACK_PREC[month],
-      source: 'fallback',
+      avgHighTemp: null,
+      avgLowTemp: null,
+      totalPrecipitation: null,
+      source: 'unavailable',
     };
   }
 }

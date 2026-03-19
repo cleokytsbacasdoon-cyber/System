@@ -120,6 +120,7 @@ const mapMonthlyTourismDataset = (row) => ({
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
 const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/Top10MH.csv');
+const HISTORICAL_DATASET_CSV_PATH = path.resolve(__dirname, '../db/2016 - 2025 datasets.csv');
 const MODEL_STORAGE_DIR = process.env.ML_MODEL_DIR
   ? path.resolve(__dirname, '..', process.env.ML_MODEL_DIR)
   : path.resolve(__dirname, '../models');
@@ -132,6 +133,11 @@ const MONTH_NAME_TO_NUMBER = MONTH_NAMES.reduce((acc, item, index) => {
   acc[item] = index + 1;
   return acc;
 }, {});
+const HISTORICAL_START_YEAR = 2016;
+const HISTORICAL_END_YEAR = 2025;
+const PANGALAO_LATITUDE = 9.5728;
+const PANGALAO_LONGITUDE = 123.7553;
+const PANGALAO_TIMEZONE = 'Asia%2FManila';
 
 const sanitizeModelName = (value) =>
   String(value || 'xgboost_base')
@@ -211,6 +217,97 @@ const readTop10MarketHolidaysFromCsv = () => {
   }
 
   return records;
+};
+
+const readHistoricalDatasetFromCsv = () => {
+  const raw = fs.readFileSync(HISTORICAL_DATASET_CSV_PATH, 'utf8').trim();
+  if (!raw) return [];
+
+  const [headerLine, ...dataLines] = raw.split(/\r?\n/);
+  const headers = headerLine.split(',').map((item) => item.trim());
+
+  return dataLines
+    .filter(Boolean)
+    .map((line) => {
+      const values = line.split(',').map((item) => item.trim());
+      const row = {};
+
+      headers.forEach((header, index) => {
+        row[header] = values[index];
+      });
+
+      const monthNumber = MONTH_NAME_TO_NUMBER[String(row.Month || '').toLowerCase()];
+      if (!Number.isInteger(monthNumber)) return null;
+
+      return {
+        year: Number(row.Year),
+        month: monthNumber,
+        arrivals: Number(row.Arrivals),
+        isPeakSeason: Number(row.Peak_Season) === 1,
+        philippineHolidayCount: Number(row.Philippine_Holidays),
+        top10MarketHolidays: Number(row.Top10Market_Holidays),
+        avgHighTempC: Number(row.Avg_HighTemp),
+        avgLowTempC: Number(row.Avg_LowTemp),
+        precipitationCm: Number(row.Precipitation),
+        inflationRate: Number(row.Inflation_Rate),
+        isDecember: Number(row.is_December) === 1,
+        isLockdown: Number(row.is_Lockdown) === 1,
+      };
+    })
+    .filter(Boolean);
+};
+
+const getHistoricalDatasetRecord = (year, month) => {
+  const records = readHistoricalDatasetFromCsv();
+  return records.find((record) => record.year === year && record.month === month) || null;
+};
+
+const fetchMonthlyWeatherFromOpenMeteo = async (year, month) => {
+  const mm = String(month).padStart(2, '0');
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+  const startDate = `${year}-${mm}-01`;
+
+  const url =
+    `https://archive-api.open-meteo.com/v1/archive` +
+    `?latitude=${PANGALAO_LATITUDE}&longitude=${PANGALAO_LONGITUDE}` +
+    `&start_date=${startDate}&end_date=${endDate}` +
+    `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum` +
+    `&timezone=${PANGALAO_TIMEZONE}`;
+
+  const response = await axios.get(url, { timeout: 10000 });
+  const daily = response.data?.daily || {};
+  const maxTemps = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max : [];
+  const minTemps = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min : [];
+  const precip = Array.isArray(daily.precipitation_sum) ? daily.precipitation_sum : [];
+
+  if (maxTemps.length === 0) return null;
+
+  const avg = (arr) => arr.reduce((sum, value) => sum + Number(value || 0), 0) / Math.max(arr.length, 1);
+  const precipTotalCm = precip.reduce((sum, value) => sum + Number(value || 0), 0) / 10;
+
+  return {
+    avgHighTempC: Number(avg(maxTemps).toFixed(2)),
+    avgLowTempC: Number(avg(minTemps).toFixed(2)),
+    precipitationCm: Number(precipTotalCm.toFixed(2)),
+  };
+};
+
+const fetchPhilippineHolidayCountFromCalendarific = async (year, month) => {
+  const apiKey = process.env.CALENDARIFIC_API_KEY;
+  if (!apiKey) return null;
+
+  const response = await axios.get(CALENDARIFIC_BASE_URL, {
+    params: {
+      api_key: apiKey,
+      country: 'PH',
+      year,
+      month,
+    },
+    timeout: 10000,
+  });
+
+  return (response.data?.response?.holidays || []).length;
 };
 
 app.get('/api/health', async (_req, res) => {
@@ -695,8 +792,56 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
       return res.status(400).json({ error: 'month is required and must be between 1 and 12' });
     }
 
-    if (!Number.isFinite(Number(arrivals))) {
-      return res.status(400).json({ error: 'arrivals is required and must be numeric' });
+    const isHistoricalYear = year >= HISTORICAL_START_YEAR && year <= HISTORICAL_END_YEAR;
+
+    let resolvedRow = null;
+
+    if (isHistoricalYear) {
+      const historicalRow = getHistoricalDatasetRecord(year, month);
+      if (!historicalRow) {
+        return res.status(400).json({
+          error: `Historical dataset row not found for ${year}-${month}`,
+          details: 'For 2016-2025, only the provided historical dataset is allowed.',
+        });
+      }
+
+      resolvedRow = {
+        arrivals: historicalRow.arrivals,
+        avgHighTempC: historicalRow.avgHighTempC,
+        avgLowTempC: historicalRow.avgLowTempC,
+        precipitationCm: historicalRow.precipitationCm,
+        inflationRate: historicalRow.inflationRate,
+        isPeakSeason: historicalRow.isPeakSeason,
+        isDecember: historicalRow.isDecember,
+        isLockdown: historicalRow.isLockdown,
+        philippineHolidayCount: historicalRow.philippineHolidayCount,
+        top10MarketHolidays: historicalRow.top10MarketHolidays,
+      };
+    } else {
+      if (!Number.isFinite(Number(arrivals))) {
+        return res.status(400).json({ error: 'arrivals is required and must be numeric' });
+      }
+
+      const weatherFromApi = (avgHighTempC == null || avgLowTempC == null || precipitationCm == null)
+        ? await fetchMonthlyWeatherFromOpenMeteo(year, month).catch(() => null)
+        : null;
+
+      const holidayCountFromApi = philippineHolidayCount == null
+        ? await fetchPhilippineHolidayCountFromCalendarific(year, month).catch(() => null)
+        : null;
+
+      resolvedRow = {
+        arrivals: Number(arrivals),
+        avgHighTempC: avgHighTempC ?? weatherFromApi?.avgHighTempC ?? null,
+        avgLowTempC: avgLowTempC ?? weatherFromApi?.avgLowTempC ?? null,
+        precipitationCm: precipitationCm ?? weatherFromApi?.precipitationCm ?? null,
+        inflationRate: inflationRate ?? null,
+        isPeakSeason: isPeakSeason ?? null,
+        isDecember: isDecember ?? month === 12,
+        isLockdown: isLockdown ?? null,
+        philippineHolidayCount: philippineHolidayCount ?? holidayCountFromApi,
+        top10MarketHolidays: top10MarketHolidays ?? null,
+      };
     }
 
     const result = await query(
@@ -725,16 +870,16 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
       [
         year,
         month,
-        Number(arrivals),
-        avgHighTempC ?? null,
-        avgLowTempC ?? null,
-        precipitationCm ?? null,
-        inflationRate ?? null,
-        isPeakSeason ?? null,
-        isDecember ?? null,
-        isLockdown ?? null,
-        philippineHolidayCount ?? null,
-        top10MarketHolidays ?? null,
+        Number(resolvedRow.arrivals),
+        resolvedRow.avgHighTempC,
+        resolvedRow.avgLowTempC,
+        resolvedRow.precipitationCm,
+        resolvedRow.inflationRate,
+        resolvedRow.isPeakSeason,
+        resolvedRow.isDecember,
+        resolvedRow.isLockdown,
+        resolvedRow.philippineHolidayCount,
+        resolvedRow.top10MarketHolidays,
       ]
     );
 

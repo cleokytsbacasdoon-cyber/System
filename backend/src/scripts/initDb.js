@@ -6,7 +6,9 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const { pool } = require('../db');
 
-const DATASET_CSV_PATH = path.resolve(__dirname, '../../db/dataset.csv');
+const DATASET_CSV_PATH = path.resolve(__dirname, '../../db/2016 - 2025 datasets.csv');
+const HISTORICAL_START_YEAR = 2016;
+const HISTORICAL_END_YEAR = 2025;
 
 const MONTH_TO_NUMBER = {
   january: 1,
@@ -128,6 +130,11 @@ async function init() {
   try {
     await client.query('BEGIN');
     await client.query(sql);
+    await client.query(
+      `DELETE FROM monthly_tourism_dataset
+       WHERE year BETWEEN $1 AND $2`,
+      [HISTORICAL_START_YEAR, HISTORICAL_END_YEAR]
+    );
     await upsertMonthlyDataset(client, datasetRows);
     await client.query('COMMIT');
     console.log('Database initialized successfully.');
