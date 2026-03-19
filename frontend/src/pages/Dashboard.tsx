@@ -17,6 +17,9 @@ import {
   getTrainedModels,
   useTrainedModel,
   simulateMonthlyRetraining,
+  getCheckinsSubmission,
+  CheckinsSubmissionData,
+  upsertMonthlyTourismDataset,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
@@ -150,6 +153,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
   const [monthlyTourismData, setMonthlyTourismData] = useState<MonthlyTourismDatasetRecord[]>([]);
   const [top10MarketHolidayData, setTop10MarketHolidayData] = useState<Top10MarketHolidayRecord[]>([]);
+  const [futureCheckinsSubmission, setFutureCheckinsSubmission] = useState<CheckinsSubmissionData | null>(null);
   const [trainedModels, setTrainedModels] = useState<TrainedModel[]>([]);
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,10 +169,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [simulateMonth, setSimulateMonth] = useState(new Date().getMonth() + 1);
   const [simulateYear, setSimulateYear] = useState(new Date().getFullYear());
   const [isSimulating, setIsSimulating] = useState(false);
+  const [manualInflationRate, setManualInflationRate] = useState('');
+  const [manualIsLockdown, setManualIsLockdown] = useState<'yes' | 'no'>('no');
+  const [isSavingManualFields, setIsSavingManualFields] = useState(false);
+  const [weatherLatencyMs, setWeatherLatencyMs] = useState<number | null>(null);
+  const [holidayLatencyMs, setHolidayLatencyMs] = useState<number | null>(null);
+  const [panglaoLatencyMs, setPanglaoLatencyMs] = useState<number | null>(null);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
   const knownAlertIdsRef = useRef<Set<string>>(new Set());
   const previousEndpointStatusRef = useRef<Map<string, APIEndpoint['status']>>(new Map());
-  const previousMonthlyRowsCountRef = useRef<number | null>(null);
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -273,6 +282,61 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       addToast(err instanceof Error ? err.message : 'Failed to switch active model', 'error');
     }
   };
+
+  const handleGeneratePrediction = async (model: TrainedModel) => {
+    try {
+      if (!model.inUse) {
+        await useTrainedModel(model.id);
+      }
+      await loadData();
+      setActiveTab('metrics');
+      addToast(`Prediction generated using ${model.modelName}`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to generate prediction', 'error');
+    }
+  };
+
+  const persistCutoffManualFields = useCallback(async (nextInflationRate: string, nextLockdown: 'yes' | 'no') => {
+    if (simulateYear < 2026) {
+      return;
+    }
+
+    const normalizedInflation = nextInflationRate.trim();
+    const inflationValue = normalizedInflation === '' ? null : Number(normalizedInflation);
+    if (normalizedInflation !== '' && !Number.isFinite(inflationValue)) {
+      addToast('Inflation rate must be a valid number', 'error');
+      return;
+    }
+
+    try {
+      setIsSavingManualFields(true);
+      const startedAt = performance.now();
+      const panglaoData = await getCheckinsSubmission(simulateYear, simulateMonth);
+      setPanglaoLatencyMs(Math.round(performance.now() - startedAt));
+
+      if (!Number.isFinite(Number(panglaoData.totalCheckIns)) || Number(panglaoData.totalCheckIns) <= 0) {
+        addToast(`No Panglao check-ins data available yet for ${months[simulateMonth - 1]} ${simulateYear}`, 'error');
+        return;
+      }
+
+      await upsertMonthlyTourismDataset({
+        year: simulateYear,
+        month: simulateMonth,
+        arrivals: panglaoData.totalCheckIns,
+        inflationRate: inflationValue,
+        isLockdown: nextLockdown === 'yes',
+      });
+
+      const refreshed = await getMonthlyTourismDataset();
+      setMonthlyTourismData(refreshed);
+      setFutureCheckinsSubmission(panglaoData);
+      addToast(`Saved inflation/lockdown for ${months[simulateMonth - 1]} ${simulateYear}`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to save inflation/lockdown values', 'error');
+    } finally {
+      setIsSavingManualFields(false);
+    }
+  }, [addToast, months, simulateMonth, simulateYear]);
 
   const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = parseInt(e.target.value, 10);
@@ -405,6 +469,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     ) || null;
   }, [dashboardMonth, dashboardYear, monthlyTourismData]);
 
+  const selectedCutoffMonthlyRecord = useMemo(() => {
+    return monthlyTourismData.find(
+      (row) => row.year === simulateYear && row.month === simulateMonth
+    ) || null;
+  }, [monthlyTourismData, simulateMonth, simulateYear]);
+
   const top10MarketHolidayForSelectedMonth = useMemo(() => {
     return top10MarketHolidayData
       .filter((row) => row.year === dashboardYear && row.month === dashboardMonth + 1)
@@ -417,9 +487,80 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   );
 
   useEffect(() => {
+    if (!selectedCutoffMonthlyRecord) {
+      setManualInflationRate('');
+      setManualIsLockdown('no');
+      return;
+    }
+
+    setManualInflationRate(
+      selectedCutoffMonthlyRecord.inflationRate !== null && selectedCutoffMonthlyRecord.inflationRate !== undefined
+        ? String(selectedCutoffMonthlyRecord.inflationRate)
+        : ''
+    );
+    setManualIsLockdown(selectedCutoffMonthlyRecord.isLockdown ? 'yes' : 'no');
+  }, [selectedCutoffMonthlyRecord]);
+
+  useEffect(() => {
+    if (dashboardYear < 2026) {
+      setFutureCheckinsSubmission(null);
+      setPanglaoLatencyMs(null);
+      return;
+    }
+
+    const syncFutureMonthFromPanglao = async () => {
+      try {
+        const monthNumber = dashboardMonth + 1;
+        const startedAt = performance.now();
+        const data = await getCheckinsSubmission(dashboardYear, monthNumber);
+        setPanglaoLatencyMs(Math.round(performance.now() - startedAt));
+        setFutureCheckinsSubmission(data);
+
+        if (!Number.isFinite(Number(data.totalCheckIns)) || Number(data.totalCheckIns) <= 0) {
+          return;
+        }
+
+        const existingRow = selectedMonthlyTourismRecord;
+        const needsInsertOrUpdate = !existingRow || Number(existingRow.arrivals) !== Number(data.totalCheckIns);
+        if (!needsInsertOrUpdate) return;
+
+        await upsertMonthlyTourismDataset({
+          year: dashboardYear,
+          month: monthNumber,
+          arrivals: data.totalCheckIns,
+          inflationRate: existingRow?.inflationRate ?? null,
+          isLockdown: existingRow?.isLockdown ?? false,
+        });
+
+        const refreshed = await getMonthlyTourismDataset();
+        setMonthlyTourismData(refreshed);
+
+        addNotification({
+          id: `panglao-data-${dashboardYear}-${monthNumber}-${data.totalCheckIns}`,
+          title: 'Panglao Data Added',
+          description: `${months[monthNumber - 1]} ${dashboardYear} data was found in Panglao ITDMS API and added to the system.`,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        setFutureCheckinsSubmission(null);
+        setPanglaoLatencyMs(null);
+      }
+    };
+
+    syncFutureMonthFromPanglao();
+  }, [addNotification, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
+
+  useEffect(() => {
+    const startedAt = performance.now();
     getPhilippineHolidays(dashboardYear, dashboardMonth + 1)
-      .then((items) => setDashboardHolidayCountApi(items.length))
-      .catch(() => setDashboardHolidayCountApi(null));
+      .then((items) => {
+        setHolidayLatencyMs(Math.round(performance.now() - startedAt));
+        setDashboardHolidayCountApi(items.length);
+      })
+      .catch(() => {
+        setHolidayLatencyMs(null);
+        setDashboardHolidayCountApi(null);
+      });
   }, [dashboardMonth, dashboardYear]);
 
   const bestModelUsed = useMemo(() => {
@@ -431,9 +572,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return typeof active?.accuracy === 'number' ? `${(active.accuracy * 100).toFixed(2)}%` : 'N/A';
   }, [trainedModels]);
   const submissionRate = useMemo(() => {
+    if (dashboardYear >= 2026 && futureCheckinsSubmission) {
+      return `${futureCheckinsSubmission.submissionRatePercentage.toFixed(2)}%`;
+    }
+
     if (dataQuality) return `${dataQuality.completeness.toFixed(1)}%`;
     return 'N/A';
-  }, [dataQuality]);
+  }, [dashboardYear, dataQuality, futureCheckinsSubmission]);
+
+  const selectedTotalTourists = useMemo(() => {
+    if (dashboardYear >= 2026 && futureCheckinsSubmission) {
+      return futureCheckinsSubmission.totalCheckIns;
+    }
+
+    return selectedDashboardData?.total ?? null;
+  }, [dashboardYear, futureCheckinsSubmission, selectedDashboardData]);
   const currentMonthHolidayCount = useMemo(() => {
     if (selectedMonthlyTourismRecord?.philippineHolidayCount !== null && selectedMonthlyTourismRecord?.philippineHolidayCount !== undefined) {
       return selectedMonthlyTourismRecord.philippineHolidayCount;
@@ -451,8 +604,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [weatherLoading, setWeatherLoading] = useState(false);
   useEffect(() => {
     setWeatherLoading(true);
+    const startedAt = performance.now();
     fetchMonthlyWeather(dashboardYear, dashboardMonth)
-      .then((data) => setWeatherData(data))
+      .then((data) => {
+        setWeatherLatencyMs(Math.round(performance.now() - startedAt));
+        setWeatherData(data);
+      })
+      .catch(() => {
+        setWeatherLatencyMs(null);
+        setWeatherData(null);
+      })
       .finally(() => setWeatherLoading(false));
   }, [dashboardMonth, dashboardYear]);
 
@@ -465,7 +626,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       return selectedMonthlyTourismRecord.isPeakSeason;
     }
 
-    const peakSeasonMonths = [2, 3, 4, 11];
+    const peakSeasonMonths = [7, 11];
     return peakSeasonMonths.includes(dashboardMonth);
   }, [dashboardMonth, selectedMonthlyTourismRecord]);
   const isDecember = useMemo(() => {
@@ -618,15 +779,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         name: 'Open Meteo',
         usedFor: 'Monthly weather values (average high/low temperature and precipitation).',
         status: weatherData?.source === 'api' ? 'active' : 'inactive',
+        latencyMs: weatherLatencyMs,
       },
       {
         id: 'calendarific',
         name: 'Calendarific',
         usedFor: 'Philippine holiday count used in feature engineering and trend parameters.',
         status: dashboardHolidayCountApi !== null ? 'active' : 'inactive',
+        latencyMs: holidayLatencyMs,
+      },
+      {
+        id: 'panglao-itdms',
+        name: 'Panglao ITDMS API',
+        usedFor: 'Future total tourists and submission rate (2026+).',
+        status: futureCheckinsSubmission !== null ? 'active' : 'inactive',
+        latencyMs: panglaoLatencyMs,
       },
     ],
-    [dashboardHolidayCountApi, weatherData?.source]
+    [dashboardHolidayCountApi, futureCheckinsSubmission, holidayLatencyMs, panglaoLatencyMs, weatherData?.source, weatherLatencyMs]
   );
 
   useEffect(() => {
@@ -663,23 +833,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       previousStatuses.set(endpoint.id, endpoint.status);
     }
   }, [addNotification, endpoints]);
-
-  useEffect(() => {
-    const previousCount = previousMonthlyRowsCountRef.current;
-    const currentCount = monthlyTourismData.length;
-
-    if (previousCount !== null && currentCount > previousCount) {
-      const addedRows = currentCount - previousCount;
-      addNotification({
-        id: `data-detected-${currentCount}`,
-        title: 'New Data Detected',
-        description: `${addedRows} new dataset record${addedRows > 1 ? 's were' : ' was'} detected in monthly tourism data.`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    previousMonthlyRowsCountRef.current = currentCount;
-  }, [addNotification, monthlyTourismData.length]);
 
   useEffect(() => {
     if (!isNotificationOpen || notificationItems.length === 0) return;
@@ -955,7 +1108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
                       <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>{`Total Tourist of ${dashboardMonthLabel}`}</p>
                       <p className="text-3xl font-bold text-sky-500">
-                        {selectedDashboardData ? Math.round(selectedDashboardData.total).toLocaleString() : 'N/A'}
+                        {selectedTotalTourists !== null ? Math.round(selectedTotalTourists).toLocaleString() : 'N/A'}
                       </p>
                     </div>
                     <div className={`rounded-lg shadow p-4 border-l-4 border-sky-500 ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white'}`}>
@@ -1145,15 +1298,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                         </button>
                       </div>
                     </div>
-                    <div className="mt-3">
-                      <button
-                        onClick={handleSimulateMonthlyRetraining}
-                        disabled={isSimulating}
-                        className="w-full md:w-auto px-4 py-2 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-60"
-                      >
-                        {isSimulating ? 'Running Train/Test...' : 'Train and Test Model for Future Prediction'}
-                      </button>
+                    <div className={`mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                      <div>
+                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Inflation Rate (manual)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={manualInflationRate}
+                          onChange={(e) => setManualInflationRate(e.target.value)}
+                          onBlur={() => persistCutoffManualFields(manualInflationRate, manualIsLockdown)}
+                          placeholder="e.g. 2.50"
+                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                        />
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Saved automatically for selected cutoff month/year on blur.
+                        </p>
+                      </div>
+                      <div>
+                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>is Lockdown (manual)</label>
+                        <select
+                          value={manualIsLockdown}
+                          onChange={(e) => {
+                            const value = e.target.value as 'yes' | 'no';
+                            setManualIsLockdown(value);
+                            persistCutoffManualFields(manualInflationRate, value);
+                          }}
+                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                        >
+                          <option value="no">No</option>
+                          <option value="yes">Yes</option>
+                        </select>
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Default is No. Changes are auto-saved to the selected cutoff month/year.
+                        </p>
+                      </div>
                     </div>
+                    {isSavingManualFields && (
+                      <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Saving inflation/lockdown values...</p>
+                    )}
                     <div className={`mt-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
                       <p className="text-xs">Generated model name</p>
                       <p className="text-sm font-semibold break-all">{generatedModelNamePreview}</p>
@@ -1178,7 +1360,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             <th className="text-left py-2 pr-3">Date Created</th>
                             <th className="text-left py-2 pr-3">Accuracy</th>
                             <th className="text-left py-2 pr-3">In Use</th>
-                            <th className="text-left py-2">Action</th>
+                            <th className="text-left py-2 pr-3">Action</th>
+                            <th className="text-left py-2">Generate Prediction</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1194,13 +1377,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                   <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>No</span>
                                 )}
                               </td>
-                              <td className="py-2">
+                              <td className="py-2 pr-3">
                                 <button
                                   onClick={() => handleUseModel(model.id)}
                                   disabled={model.inUse}
                                   className="px-3 py-1 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-60"
                                 >
                                   {model.inUse ? 'Active' : 'Use'}
+                                </button>
+                              </td>
+                              <td className="py-2">
+                                <button
+                                  onClick={() => handleGeneratePrediction(model)}
+                                  className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                >
+                                  Generate
                                 </button>
                               </td>
                             </tr>
@@ -1225,6 +1416,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                           <tr className={isDarkMode ? 'border-b border-slate-700 text-gray-300' : 'border-b border-gray-200 text-gray-600'}>
                             <th className="text-left py-2 pr-3">API</th>
                             <th className="text-left py-2 pr-3">Used For</th>
+                            <th className="text-left py-2 pr-3">Latency</th>
                             <th className="text-left py-2">Status</th>
                           </tr>
                         </thead>
@@ -1233,6 +1425,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             <tr key={api.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
                               <td className="py-2 pr-3 font-medium">{api.name}</td>
                               <td className="py-2 pr-3">{api.usedFor}</td>
+                              <td className="py-2 pr-3">{api.latencyMs !== null && api.latencyMs !== undefined ? `${api.latencyMs} ms` : 'N/A'}</td>
                               <td className="py-2">
                                 <span className="inline-flex items-center gap-2 text-sm">
                                   <span className={`h-2.5 w-2.5 rounded-full ${api.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`} />

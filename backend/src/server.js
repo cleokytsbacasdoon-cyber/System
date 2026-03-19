@@ -119,6 +119,7 @@ const mapMonthlyTourismDataset = (row) => ({
 });
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
+const PANGLAO_CHECKINS_SUBMISSION_API_URL = 'https://panglaoitdms.com/api/research/checkins-submission';
 const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/Top10MH.csv');
 const HISTORICAL_DATASET_CSV_PATH = path.resolve(__dirname, '../db/2016 - 2025 datasets.csv');
 const MODEL_STORAGE_DIR = process.env.ML_MODEL_DIR
@@ -308,6 +309,22 @@ const fetchPhilippineHolidayCountFromCalendarific = async (year, month) => {
   });
 
   return (response.data?.response?.holidays || []).length;
+};
+
+const fetchPanglaoCheckinsSubmission = async (year, month) => {
+  const response = await axios.get(PANGLAO_CHECKINS_SUBMISSION_API_URL, {
+    params: { year, month },
+    timeout: 10000,
+  });
+
+  const payload = response.data?.data || {};
+
+  return {
+    year: Number(payload.year ?? year),
+    month: Number(payload.month ?? month),
+    totalCheckIns: Number(payload.total_check_ins ?? 0),
+    submissionRatePercentage: Number(payload.submission_rate_percentage ?? 0),
+  };
 };
 
 app.get('/api/health', async (_req, res) => {
@@ -736,6 +753,26 @@ app.get('/api/forecasts/insights', async (_req, res, next) => {
   }
 });
 
+app.get('/api/research/checkins-submission', async (req, res, next) => {
+  try {
+    const year = Number(req.query.year);
+    const month = Number(req.query.month);
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'year query parameter is required and must be between 2000 and 2100' });
+    }
+
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'month query parameter is required and must be between 1 and 12' });
+    }
+
+    const data = await fetchPanglaoCheckinsSubmission(year, month);
+    return res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/datasets/tourism/monthly', async (req, res, next) => {
   try {
     const year = req.query.year !== undefined ? Number(req.query.year) : undefined;
@@ -836,9 +873,12 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
         avgLowTempC: avgLowTempC ?? weatherFromApi?.avgLowTempC ?? null,
         precipitationCm: precipitationCm ?? weatherFromApi?.precipitationCm ?? null,
         inflationRate: inflationRate ?? null,
-        isPeakSeason: isPeakSeason ?? null,
-        isDecember: isDecember ?? month === 12,
-        isLockdown: isLockdown ?? null,
+        // Future rule: peak season is only August and December.
+        isPeakSeason: month === 8 || month === 12,
+        // Future rule: December flag is only true for December.
+        isDecember: month === 12,
+        // Future rule: lockdown is manually controlled by user input (default false).
+        isLockdown: isLockdown ?? false,
         philippineHolidayCount: philippineHolidayCount ?? holidayCountFromApi,
         top10MarketHolidays: top10MarketHolidays ?? null,
       };

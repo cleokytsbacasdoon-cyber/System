@@ -135,11 +135,48 @@ export const getMonthlyTourismDataset = async (
   return response.data;
 };
 
+export interface UpsertMonthlyTourismDatasetPayload {
+  year: number;
+  month: number;
+  arrivals: number;
+  avgHighTempC?: number | null;
+  avgLowTempC?: number | null;
+  precipitationCm?: number | null;
+  inflationRate?: number | null;
+  isPeakSeason?: boolean | null;
+  isDecember?: boolean | null;
+  isLockdown?: boolean | null;
+  philippineHolidayCount?: number | null;
+  top10MarketHolidays?: string | null;
+}
+
+export const upsertMonthlyTourismDataset = async (
+  payload: UpsertMonthlyTourismDatasetPayload
+): Promise<MonthlyTourismDatasetRecord> => {
+  const response = await apiClient.post('/datasets/tourism/monthly', payload);
+  return response.data;
+};
+
 export const getTop10MarketHolidays = async (
   params?: { year?: number; month?: number }
 ): Promise<Top10MarketHolidayRecord[]> => {
   if (USE_MOCK_API) return mockApi.getTop10MarketHolidays(params);
   const response = await apiClient.get('/datasets/tourism/top10-market-holidays', { params });
+  return response.data;
+};
+
+export interface CheckinsSubmissionData {
+  year: number;
+  month: number;
+  totalCheckIns: number;
+  submissionRatePercentage: number;
+}
+
+export const getCheckinsSubmission = async (year: number, month: number): Promise<CheckinsSubmissionData> => {
+  const response = await apiClient.get('/research/checkins-submission', {
+    params: { year, month },
+  });
+
   return response.data;
 };
 
