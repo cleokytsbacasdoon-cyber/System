@@ -107,3 +107,12 @@ CREATE TABLE IF NOT EXISTS monthly_tourism_dataset (
 
 CREATE INDEX IF NOT EXISTS idx_monthly_tourism_dataset_year_month
   ON monthly_tourism_dataset (year, month);
+
+CREATE TABLE IF NOT EXISTS philippine_holiday_counts (
+  year INTEGER NOT NULL CHECK (year BETWEEN 1900 AND 2100),
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  holiday_count INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'calendarific',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (year, month)
+);

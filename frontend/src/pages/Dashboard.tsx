@@ -13,7 +13,6 @@ import {
   getDataQuality,
   getMonthlyTourismDataset,
   getTop10MarketHolidays,
-  getPhilippineHolidays,
   getTrainedModels,
   useTrainedModel,
   simulateMonthlyRetraining,
@@ -551,17 +550,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [addNotification, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
 
   useEffect(() => {
-    const startedAt = performance.now();
-    getPhilippineHolidays(dashboardYear, dashboardMonth + 1)
-      .then((items) => {
-        setHolidayLatencyMs(Math.round(performance.now() - startedAt));
-        setDashboardHolidayCountApi(items.length);
-      })
-      .catch(() => {
-        setHolidayLatencyMs(null);
-        setDashboardHolidayCountApi(null);
-      });
-  }, [dashboardMonth, dashboardYear]);
+    if (selectedMonthlyTourismRecord?.philippineHolidayCount !== null && selectedMonthlyTourismRecord?.philippineHolidayCount !== undefined) {
+      setDashboardHolidayCountApi(selectedMonthlyTourismRecord.philippineHolidayCount);
+      setHolidayLatencyMs(0);
+      return;
+    }
+
+    // Strict mode: month/year navigation should never trigger Calendarific.
+    setDashboardHolidayCountApi(null);
+    setHolidayLatencyMs(null);
+  }, [selectedMonthlyTourismRecord]);
 
   const bestModelUsed = useMemo(() => {
     const active = trainedModels.find((model) => model.inUse);

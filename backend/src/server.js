@@ -140,6 +140,53 @@ const PANGALAO_LATITUDE = 9.5728;
 const PANGALAO_LONGITUDE = 123.7553;
 const PANGALAO_TIMEZONE = 'Asia%2FManila';
 
+const ensureHolidayCacheTable = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS philippine_holiday_counts (
+      year INTEGER NOT NULL CHECK (year BETWEEN 1900 AND 2100),
+      month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+      holiday_count INTEGER NOT NULL,
+      source TEXT NOT NULL DEFAULT 'calendarific',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (year, month)
+    )
+  `);
+};
+
+const getCachedPhilippineHolidayCount = async (year, month) => {
+  const result = await query(
+    `SELECT holiday_count
+     FROM philippine_holiday_counts
+     WHERE year = $1 AND month = $2
+     LIMIT 1`,
+    [year, month]
+  );
+
+  if (result.rowCount === 0) return null;
+  return Number(result.rows[0].holiday_count);
+};
+
+const cachePhilippineHolidayCount = async (year, month, count) => {
+  await query(
+    `INSERT INTO philippine_holiday_counts (year, month, holiday_count, source, updated_at)
+     VALUES ($1, $2, $3, 'calendarific', NOW())
+     ON CONFLICT (year, month) DO UPDATE SET
+       holiday_count = EXCLUDED.holiday_count,
+       source = EXCLUDED.source,
+       updated_at = NOW()`,
+    [year, month, count]
+  );
+
+  // Also backfill monthly dataset if the row exists for model feature reuse.
+  await query(
+    `UPDATE monthly_tourism_dataset
+     SET philippine_holiday_count = $3,
+         updated_at = NOW()
+     WHERE year = $1 AND month = $2`,
+    [year, month, count]
+  );
+};
+
 const sanitizeModelName = (value) =>
   String(value || 'xgboost_base')
     .trim()
@@ -829,6 +876,16 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
       return res.status(400).json({ error: 'month is required and must be between 1 and 12' });
     }
 
+    const existingMonthResult = await query(
+      `SELECT philippine_holiday_count
+       FROM monthly_tourism_dataset
+       WHERE year = $1 AND month = $2
+       LIMIT 1`,
+      [year, month]
+    );
+    const existingMonthRow = existingMonthResult.rowCount > 0 ? existingMonthResult.rows[0] : null;
+    const isNewMonthRow = existingMonthResult.rowCount === 0;
+
     const isHistoricalYear = year >= HISTORICAL_START_YEAR && year <= HISTORICAL_END_YEAR;
 
     let resolvedRow = null;
@@ -859,12 +916,28 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
         return res.status(400).json({ error: 'arrivals is required and must be numeric' });
       }
 
+      let resolvedPhilippineHolidayCount =
+        philippineHolidayCount ??
+        (existingMonthRow?.philippine_holiday_count !== null && existingMonthRow?.philippine_holiday_count !== undefined
+          ? Number(existingMonthRow.philippine_holiday_count)
+          : null);
+
+      // Call Calendarific only once when a brand-new month is detected and count is still missing.
+      if (resolvedPhilippineHolidayCount === null && isNewMonthRow) {
+        const cachedCount = await getCachedPhilippineHolidayCount(year, month);
+        if (cachedCount !== null) {
+          resolvedPhilippineHolidayCount = cachedCount;
+        } else {
+          const fetchedCount = await fetchPhilippineHolidayCountFromCalendarific(year, month).catch(() => null);
+          if (Number.isInteger(fetchedCount)) {
+            resolvedPhilippineHolidayCount = Number(fetchedCount);
+            await cachePhilippineHolidayCount(year, month, resolvedPhilippineHolidayCount);
+          }
+        }
+      }
+
       const weatherFromApi = (avgHighTempC == null || avgLowTempC == null || precipitationCm == null)
         ? await fetchMonthlyWeatherFromOpenMeteo(year, month).catch(() => null)
-        : null;
-
-      const holidayCountFromApi = philippineHolidayCount == null
-        ? await fetchPhilippineHolidayCountFromCalendarific(year, month).catch(() => null)
         : null;
 
       resolvedRow = {
@@ -879,7 +952,7 @@ app.post('/api/datasets/tourism/monthly', async (req, res, next) => {
         isDecember: month === 12,
         // Future rule: lockdown is manually controlled by user input (default false).
         isLockdown: isLockdown ?? false,
-        philippineHolidayCount: philippineHolidayCount ?? holidayCountFromApi,
+        philippineHolidayCount: resolvedPhilippineHolidayCount,
         top10MarketHolidays: top10MarketHolidays ?? null,
       };
     }
@@ -988,6 +1061,19 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
           holidays: [],
         });
       }
+
+      // Then try dedicated holiday cache table.
+      const cachedCount = await getCachedPhilippineHolidayCount(year, month);
+      if (cachedCount !== null) {
+        return res.json({
+          country: 'PH',
+          year,
+          month,
+          source: 'philippine_holiday_counts',
+          count: cachedCount,
+          holidays: [],
+        });
+      }
     }
 
     const apiKey = process.env.CALENDARIFIC_API_KEY;
@@ -1023,6 +1109,22 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
       primaryType: Array.isArray(holiday.type) && holiday.type.length > 0 ? holiday.type[0] : 'unknown',
     }));
 
+    if (month !== undefined) {
+      await cachePhilippineHolidayCount(year, month, holidays.length);
+    } else {
+      const monthCounts = new Map();
+      for (const holiday of holidays) {
+        const holidayMonth = Number(holiday.month);
+        if (!Number.isInteger(holidayMonth) || holidayMonth < 1 || holidayMonth > 12) continue;
+        monthCounts.set(holidayMonth, (monthCounts.get(holidayMonth) || 0) + 1);
+      }
+
+      for (let m = 1; m <= 12; m += 1) {
+        const count = Number(monthCounts.get(m) || 0);
+        await cachePhilippineHolidayCount(year, m, count);
+      }
+    }
+
     res.json({
       country: 'PH',
       year,
@@ -1043,9 +1145,72 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
   }
 });
 
+app.post('/api/holidays/philippines/cache-range', async (req, res, next) => {
+  try {
+    const startYear = Number(req.body?.startYear ?? 2016);
+    const endYear = Number(req.body?.endYear ?? new Date().getFullYear());
+
+    if (!Number.isInteger(startYear) || !Number.isInteger(endYear) || startYear < 1900 || endYear > 2100 || startYear > endYear) {
+      return res.status(400).json({
+        error: 'startYear/endYear must be integers between 1900 and 2100, and startYear must be <= endYear',
+      });
+    }
+
+    const apiKey = process.env.CALENDARIFIC_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({
+        error: 'Calendarific API key is not configured',
+        details: 'Set CALENDARIFIC_API_KEY in backend .env to enable holiday caching.',
+      });
+    }
+
+    const cached = [];
+    for (let year = startYear; year <= endYear; year += 1) {
+      for (let month = 1; month <= 12; month += 1) {
+        const existing = await getCachedPhilippineHolidayCount(year, month);
+        if (existing !== null) {
+          cached.push({ year, month, count: existing, source: 'cache' });
+          continue;
+        }
+
+        const response = await axios.get(CALENDARIFIC_BASE_URL, {
+          params: {
+            api_key: apiKey,
+            country: 'PH',
+            year,
+            month,
+          },
+          timeout: 10000,
+        });
+
+        const holidays = Array.isArray(response.data?.response?.holidays)
+          ? response.data.response.holidays
+          : [];
+        const count = holidays.length;
+        await cachePhilippineHolidayCount(year, month, count);
+        cached.push({ year, month, count, source: 'calendarific' });
+      }
+    }
+
+    return res.json({
+      message: 'Holiday counts cached successfully',
+      startYear,
+      endYear,
+      monthsProcessed: cached.length,
+      results: cached,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use((error, _req, res, _next) => {
   console.error(error);
   res.status(500).json({ error: 'Internal server error', details: error.message });
+});
+
+ensureHolidayCacheTable().catch((error) => {
+  console.error('Failed to ensure philippine_holiday_counts table exists:', error.message);
 });
 
 app.listen(PORT, () => {
