@@ -152,7 +152,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
         spanGaps: true,
       },
       {
-        label: `Predicted Tourists (${monthsAhead} months)`,
+        label: 'Predicted Tourists',
         data: chartSeries.predictedData,
         borderColor: '#F97316',
         backgroundColor: 'rgba(249, 115, 22, 0.2)',
@@ -172,7 +172,7 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
         position: 'top' as const,
         labels: {
           color: isDarkMode ? '#E5E7EB' : '#374151',
-          padding: 48,
+          padding: 8,
         },
       },
     },

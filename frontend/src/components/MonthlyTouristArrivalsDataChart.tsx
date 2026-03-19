@@ -98,20 +98,22 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
 
   return (
     <div className={`rounded-lg shadow p-4 md:p-6 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className={`text-xl md:text-2xl font-bold ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
+      <div className="relative flex items-center justify-center gap-3">
+        <p className={`text-xl md:text-2xl font-bold text-center ${isDarkMode ? 'text-gray-100' : 'text-gray-800'}`}>
           Monthly Tourist Arrivals Data
         </p>
         {onYearChange && years.length > 0 && (
-          <select
-            value={year}
-            onChange={(event) => onYearChange(Number(event.target.value))}
-            className={`p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-          >
-            {years.map((itemYear) => (
-              <option key={itemYear} value={itemYear}>{itemYear}</option>
-            ))}
-          </select>
+          <div className="absolute right-0 top-1/2 -translate-y-1/2">
+            <select
+              value={year}
+              onChange={(event) => onYearChange(Number(event.target.value))}
+              className={`p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+            >
+              {years.map((itemYear) => (
+                <option key={itemYear} value={itemYear}>{itemYear}</option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
 

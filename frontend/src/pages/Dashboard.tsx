@@ -29,6 +29,8 @@ interface DashboardProps {
 interface TouristTrendParameter {
   label: string;
   value: string;
+  holidayRows?: Array<{ country: string; holidayCount: number }>;
+  totalHolidays?: number | null;
 }
 
 interface NotificationItem {
@@ -158,7 +160,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
-  const [backendApiConnected, setBackendApiConnected] = useState(false);
   const [baseModelNameInput, setBaseModelNameInput] = useState('xgboost_base');
   const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
   const [simulateMonth, setSimulateMonth] = useState(new Date().getMonth() + 1);
@@ -217,9 +218,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       setTop10MarketHolidayData(top10MarketHolidayDataset);
       setTrainedModels(trainedModelsData);
       setDataQuality(qualityData);
-      setBackendApiConnected(true);
     } catch (err) {
-      setBackendApiConnected(false);
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
     } finally {
       setLoading(false);
@@ -448,8 +447,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [dashboardMonth, dashboardYear, monthlyTourismData]);
 
   const top10MarketHolidayForSelectedMonth = useMemo(() => {
-    return top10MarketHolidayData
+    const exactMonthYear = top10MarketHolidayData
       .filter((row) => row.year === dashboardYear && row.month === dashboardMonth + 1)
+      .sort((a, b) => a.rank - b.rank);
+
+    if (exactMonthYear.length > 0) {
+      return exactMonthYear;
+    }
+
+    const sameMonthRows = top10MarketHolidayData
+      .filter((row) => row.month === dashboardMonth + 1)
+      .sort((a, b) => b.year - a.year || a.rank - b.rank);
+
+    if (sameMonthRows.length === 0) {
+      return [];
+    }
+
+    const latestAvailableYear = sameMonthRows[0].year;
+    return sameMonthRows
+      .filter((row) => row.year === latestAvailableYear)
       .sort((a, b) => a.rank - b.rank);
   }, [dashboardMonth, dashboardYear, top10MarketHolidayData]);
 
@@ -566,14 +582,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return fallbackActual > 0 ? Math.round(fallbackActual) : null;
   }, [nextMonthDate, tourismTrendForecasts]);
 
-  const top10MarketHolidaySummary = useMemo(() => {
-    if (top10MarketHolidayForSelectedMonth.length === 0) {
-      return 'No Top10MH records for selected month';
-    }
+  const top10MarketHolidayRows = useMemo(
+    () => top10MarketHolidayForSelectedMonth.map((item) => ({ country: item.country, holidayCount: item.holidayCount })),
+    [top10MarketHolidayForSelectedMonth]
+  );
 
-    return top10MarketHolidayForSelectedMonth
-      .map((item) => `${item.country}  ${item.holidayCount} holiday${item.holidayCount > 1 ? 'ies' : 'y'}`)
-      .join('\n');
+  const top10TotalHolidays = useMemo(() => {
+    if (top10MarketHolidayForSelectedMonth.length === 0) return null;
+    const csvTotal = top10MarketHolidayForSelectedMonth[0]?.totalHolidays;
+    if (Number.isFinite(Number(csvTotal))) {
+      return Number(csvTotal);
+    }
+    return top10MarketHolidayForSelectedMonth.reduce((sum, item) => sum + item.holidayCount, 0);
   }, [top10MarketHolidayForSelectedMonth]);
 
   const top10MarketHolidayCount = useMemo(
@@ -593,7 +613,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       },
       {
         label: 'Top 10 Market Holidays',
-        value: top10MarketHolidaySummary,
+        value: top10MarketHolidayRows.length > 0 ? '' : 'No Top10MH records for selected month',
+        holidayRows: top10MarketHolidayRows,
+        totalHolidays: top10TotalHolidays,
       },
       {
         label: 'Precipitation',
@@ -629,7 +651,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     monthHighTempC,
     monthLowTempC,
     monthPrecipitationCm,
-    top10MarketHolidaySummary,
+    top10MarketHolidayRows,
+    top10TotalHolidays,
     weatherLoading,
   ]);
 
@@ -663,48 +686,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     ? 'About the System'
     : navigationItems.find((item) => item.id === activeTab)?.label || 'Dashboard';
 
-  const systemApiChecks = useMemo(() => {
-    const now = new Date().toISOString();
-    const baseRows: Array<{ id: string; name: string; url: string; status: 'active' | 'inactive'; responseTime: number; lastCheck: string }> = [
-      { id: 'api-health', name: 'Backend Health', url: '/api/health', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-forecasts', name: 'Forecasts API', url: '/api/forecasts', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-model-status', name: 'Model Status API', url: '/api/ml/model/status', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-trained-models', name: 'Trained Models API', url: '/api/ml/trained-models', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-retraining-jobs', name: 'Retraining Jobs API', url: '/api/retraining/jobs', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-endpoints', name: 'API Endpoints API', url: '/api/api/endpoints', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-monthly-dataset', name: 'Monthly Dataset API', url: '/api/datasets/tourism/monthly', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-top10-holidays', name: 'Top 10 Market Holidays API', url: '/api/datasets/tourism/top10-market-holidays', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-      { id: 'api-ph-holidays', name: 'Philippine Holidays API', url: '/api/holidays/philippines', status: backendApiConnected ? 'active' : 'inactive', responseTime: 0, lastCheck: now },
-    ];
-
-    const byName = new Map(endpoints.map((endpoint) => [endpoint.name.toLowerCase(), endpoint]));
-
-    const mergedBase = baseRows.map((row) => {
-      const fromBackend = byName.get(row.name.toLowerCase());
-      if (!fromBackend) return row;
-
-      return {
-        ...row,
-        status: fromBackend.status,
-        responseTime: fromBackend.responseTime,
-        lastCheck: fromBackend.lastCheck,
-      };
-    });
-
-    const existingIds = new Set(mergedBase.map((row) => row.id));
-    const remainingBackendRows = endpoints
-      .filter((endpoint) => !existingIds.has(endpoint.id))
-      .map((endpoint) => ({
-        id: endpoint.id,
-        name: endpoint.name,
-        url: endpoint.url,
-        status: endpoint.status,
-        responseTime: endpoint.responseTime,
-        lastCheck: endpoint.lastCheck,
-      }));
-
-    return [...mergedBase, ...remainingBackendRows];
-  }, [backendApiConnected, endpoints]);
+  const externalApiStatuses = useMemo(
+    () => [
+      {
+        id: 'open-meteo',
+        name: 'Open Meteo',
+        usedFor: 'Monthly weather values (average high/low temperature and precipitation).',
+        status: weatherData?.source === 'api' ? 'active' : 'inactive',
+      },
+      {
+        id: 'calendarific',
+        name: 'Calendarific',
+        usedFor: 'Philippine holiday count used in feature engineering and trend parameters.',
+        status: dashboardHolidayCountApi !== null ? 'active' : 'inactive',
+      },
+    ],
+    [dashboardHolidayCountApi, weatherData?.source]
+  );
 
   useEffect(() => {
     const sortedAlerts = [...alerts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -996,31 +994,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           </div>
 
           <div className="px-4 md:px-8 xl:px-10 py-8">
-            <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
-              {activeTab === 'overview' && (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                  <select
-                    value={dashboardMonth}
-                    onChange={handleDashboardMonthChange}
-                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  >
-                    {months.map((month, i) => (
-                      <option key={month} value={i}>{month}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={dashboardYear}
-                    onChange={handleDashboardYearChange}
-                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  >
-                    {years.map((year) => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
+            {activeTab !== 'metrics' && (
+              <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-dark'}`}>{activeSectionLabel}</h2>
+                {activeTab === 'overview' && (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <select
+                      value={dashboardMonth}
+                      onChange={handleDashboardMonthChange}
+                      className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                    >
+                      {months.map((month, i) => (
+                        <option key={month} value={i}>{month}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={dashboardYear}
+                      onChange={handleDashboardYearChange}
+                      className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                    >
+                      {years.map((year) => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Dashboard Tab */}
             {activeTab === 'overview' && (
@@ -1076,12 +1076,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                               isDarkMode
                                 ? 'bg-slate-900 text-gray-100'
                                 : 'bg-white text-gray-700'
-                            }`}
+                            } ${isTopMarketHoliday ? 'xl:row-span-4' : ''}`}
                           >
                             <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{parameter.label}</p>
-                            <p className={`mt-2 text-sky-500 ${isTopMarketHoliday ? 'text-base font-semibold whitespace-pre-line leading-7' : 'text-xl font-bold'}`}>
-                              {parameter.value}
-                            </p>
+                            {isTopMarketHoliday && parameter.holidayRows && parameter.holidayRows.length > 0 ? (
+                              <div className="mt-3 space-y-1.5 max-h-[22rem] overflow-auto pr-1">
+                                {parameter.holidayRows.map((row) => (
+                                  <div key={row.country} className="flex items-center justify-between gap-3 text-lg text-sky-500 leading-6">
+                                    <span className="font-semibold text-left">{row.country}</span>
+                                    <span className="font-semibold text-right whitespace-nowrap">
+                                      {row.holidayCount} {row.holidayCount === 1 ? 'holiday' : 'holidays'}
+                                    </span>
+                                  </div>
+                                ))}
+                                {parameter.totalHolidays !== null && parameter.totalHolidays !== undefined && (
+                                  <div className="mt-2 border-t border-sky-300/40 pt-2 flex items-center justify-between gap-3 text-lg text-sky-500 leading-6">
+                                    <span className="font-semibold text-left"> Total holidays</span>
+                                    <span className="font-semibold text-right whitespace-nowrap">{parameter.totalHolidays}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <p className={`mt-2 text-sky-500 ${isTopMarketHoliday ? 'text-3xl font-bold leading-10' : 'text-3xl font-bold'}`}>
+                                {parameter.value}
+                              </p>
+                            )}
                           </div>
                         );
                       })}
@@ -1106,21 +1125,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     });
                   }}
                 />
-                <div className="flex items-center justify-between gap-3">
-                  <p className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Monthly Tourist Trend</p>
-                  <select
-                    value={predictionHorizonMonths}
-                    onChange={(e) => setPredictionHorizonMonths(Number(e.target.value) as 3 | 6 | 12)}
-                    className={`p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  >
-                    <option value={3}>3 months</option>
-                    <option value={6}>6 months</option>
-                    <option value={12}>12 months</option>
-                  </select>
-                </div>
                 <TouristForecastTrendChart
                   forecasts={tourismTrendForecasts}
                   monthsAhead={predictionHorizonMonths}
+                  centerTitle
+                  horizonSelectorValue={predictionHorizonMonths}
+                  onHorizonSelectorChange={(value) => setPredictionHorizonMonths(value)}
                 />
                 <div className="pt-4 flex flex-col sm:flex-row sm:items-center gap-2">
                   <select
@@ -1210,6 +1220,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                         </button>
                       </div>
                     </div>
+                    <div className="mt-3">
+                      <button
+                        onClick={handleSimulateMonthlyRetraining}
+                        disabled={isSimulating}
+                        className="w-full md:w-auto px-4 py-2 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-60"
+                      >
+                        {isSimulating ? 'Running Train/Test...' : 'Train and Test Model for Future Prediction'}
+                      </button>
+                    </div>
                     <div className={`mt-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
                       <p className="text-xs">Generated model name</p>
                       <p className="text-sm font-semibold break-all">{generatedModelNamePreview}</p>
@@ -1273,30 +1292,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 </div>
 
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
-                  <h2 className="text-2xl font-bold mb-4">Parameters (API Health Checks)</h2>
+                  <h2 className="text-2xl font-bold mb-4">API Status</h2>
                   <div className={`rounded-lg border p-4 ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className={isDarkMode ? 'border-b border-slate-700 text-gray-300' : 'border-b border-gray-200 text-gray-600'}>
                             <th className="text-left py-2 pr-3">API</th>
-                            <th className="text-left py-2 pr-3">URL</th>
-                            <th className="text-left py-2 pr-3">Response (ms)</th>
-                            <th className="text-left py-2 pr-3">Last Check</th>
+                            <th className="text-left py-2 pr-3">Used For</th>
                             <th className="text-left py-2">Status</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {systemApiChecks.map((endpoint) => (
-                            <tr key={endpoint.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
-                              <td className="py-2 pr-3 font-medium">{endpoint.name}</td>
-                              <td className="py-2 pr-3">{endpoint.url}</td>
-                              <td className="py-2 pr-3">{endpoint.responseTime > 0 ? endpoint.responseTime : '—'}</td>
-                              <td className="py-2 pr-3">{new Date(endpoint.lastCheck).toLocaleString()}</td>
+                          {externalApiStatuses.map((api) => (
+                            <tr key={api.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
+                              <td className="py-2 pr-3 font-medium">{api.name}</td>
+                              <td className="py-2 pr-3">{api.usedFor}</td>
                               <td className="py-2">
                                 <span className="inline-flex items-center gap-2 text-sm">
-                                  <span className={`h-2.5 w-2.5 rounded-full ${endpoint.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`} />
-                                  <span>{endpoint.status === 'active' ? 'Connected' : 'Disconnected'}</span>
+                                  <span className={`h-2.5 w-2.5 rounded-full ${api.status === 'active' ? 'bg-green-500' : 'bg-red-500'}`} />
+                                  <span>{api.status === 'active' ? 'Connected' : 'Disconnected'}</span>
                                 </span>
                               </td>
                             </tr>

@@ -119,7 +119,7 @@ const mapMonthlyTourismDataset = (row) => ({
 });
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
-const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/top10_market_holidays.csv');
+const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/Top10MH.csv');
 const MODEL_STORAGE_DIR = process.env.ML_MODEL_DIR
   ? path.resolve(__dirname, '..', process.env.ML_MODEL_DIR)
   : path.resolve(__dirname, '../models');
@@ -128,6 +128,10 @@ const MONTH_NAMES = [
   'january', 'february', 'march', 'april', 'may', 'june',
   'july', 'august', 'september', 'october', 'november', 'december',
 ];
+const MONTH_NAME_TO_NUMBER = MONTH_NAMES.reduce((acc, item, index) => {
+  acc[item] = index + 1;
+  return acc;
+}, {});
 
 const sanitizeModelName = (value) =>
   String(value || 'xgboost_base')
@@ -164,27 +168,49 @@ const readTop10MarketHolidaysFromCsv = () => {
   const raw = fs.readFileSync(TOP10_MARKET_HOLIDAYS_CSV_PATH, 'utf8').trim();
   if (!raw) return [];
 
-  const [headerLine, ...dataLines] = raw.split(/\r?\n/);
-  const headers = headerLine.split(',').map((item) => item.trim());
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-  return dataLines
-    .filter(Boolean)
-    .map((line) => {
-      const values = line.split(',').map((item) => item.trim());
-      const row = {};
+  const records = [];
 
-      headers.forEach((header, index) => {
-        row[header] = values[index];
+  for (let i = 0; i < lines.length - 1; i += 2) {
+    const headerValues = lines[i].split(',').map((item) => item.trim());
+    const valueValues = lines[i + 1].split(',').map((item) => item.trim());
+
+    const year = Number(headerValues[0]);
+    const monthName = String(headerValues[1] || '').toLowerCase();
+    const month = MONTH_NAME_TO_NUMBER[monthName];
+
+    if (!Number.isInteger(year) || !Number.isInteger(month)) {
+      continue;
+    }
+
+    const lastHeaderIndex = headerValues.length - 1;
+    const hasTotalColumn = String(headerValues[lastHeaderIndex] || '').toLowerCase() === 'total';
+    const countriesEndIndex = hasTotalColumn ? lastHeaderIndex - 1 : lastHeaderIndex;
+    const totalHolidays = hasTotalColumn ? Number(valueValues[lastHeaderIndex] || 0) : 0;
+
+    let rank = 1;
+    for (let col = 2; col <= countriesEndIndex; col += 1) {
+      const country = String(headerValues[col] || '').trim();
+      if (!country) continue;
+
+      records.push({
+        year,
+        month,
+        rank,
+        country,
+        holidayCount: Number(valueValues[col] || 0),
+        totalHolidays,
       });
 
-      return {
-        year: Number(row.year),
-        month: Number(row.month),
-        rank: Number(row.rank),
-        country: row.country,
-        holidayCount: Number(row.holiday_count),
-      };
-    });
+      rank += 1;
+    }
+  }
+
+  return records;
 };
 
 app.get('/api/health', async (_req, res) => {

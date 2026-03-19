@@ -109,6 +109,7 @@ export interface Top10MarketHolidayRecord {
   rank: number;
   country: string;
   holidayCount: number;
+  totalHolidays?: number;
 }
 
 export interface ForecastInsights {
