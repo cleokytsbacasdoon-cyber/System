@@ -165,6 +165,14 @@ export const getTop10MarketHolidays = async (
   return response.data;
 };
 
+export const syncTop10MarketHolidaysFromPanglao = async (
+  year: number,
+  month: number
+): Promise<{ source: string; records: Top10MarketHolidayRecord[] }> => {
+  const response = await apiClient.post('/datasets/tourism/top10-market-holidays/sync', { year, month });
+  return response.data;
+};
+
 export interface CheckinsSubmissionData {
   year: number;
   month: number;

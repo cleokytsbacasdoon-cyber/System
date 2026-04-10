@@ -120,6 +120,7 @@ const mapMonthlyTourismDataset = (row) => ({
 
 const CALENDARIFIC_BASE_URL = 'https://calendarific.com/api/v2/holidays';
 const PANGLAO_CHECKINS_SUBMISSION_API_URL = 'https://panglaoitdms.com/api/research/checkins-submission';
+const PANGLAO_TOP_NATIONALITIES_API_URL = 'https://panglaoitdms.com/api/research/top-nationalities';
 const TOP10_MARKET_HOLIDAYS_CSV_PATH = path.resolve(__dirname, '../db/Top10MH.csv');
 const HISTORICAL_DATASET_CSV_PATH = path.resolve(__dirname, '../db/2016 - 2025 datasets.csv');
 const MODEL_STORAGE_DIR = process.env.ML_MODEL_DIR
@@ -267,6 +268,204 @@ const readTop10MarketHolidaysFromCsv = () => {
   return records;
 };
 
+/** ISO country code map – used to look up Calendarific holidays per visiting nationality */
+const COUNTRY_NAME_TO_ISO = {
+  'south korea': 'KR', 'korea': 'KR',
+  'china': 'CN',
+  'usa': 'US', 'united states': 'US', 'united states of america': 'US',
+  'germany': 'DE',
+  'australia': 'AU',
+  'france': 'FR',
+  'sweden': 'SE',
+  'russia': 'RU',
+  'united kingdom': 'GB', 'uk': 'GB',
+  'switzerland': 'CH',
+  'japan': 'JP',
+  'taiwan': 'TW',
+  'singapore': 'SG',
+  'denmark': 'DK',
+  'spain': 'ES',
+  'israel': 'IL',
+  'canada': 'CA',
+  'netherlands': 'NL',
+  'italy': 'IT',
+  'belgium': 'BE',
+  'norway': 'NO',
+  'hong kong': 'HK',
+  'new zealand': 'NZ',
+  'india': 'IN',
+  'malaysia': 'MY',
+  'indonesia': 'ID',
+  'thailand': 'TH',
+  'vietnam': 'VN',
+  'brazil': 'BR',
+  'mexico': 'MX',
+  'austria': 'AT',
+  'portugal': 'PT',
+  'ireland': 'IE',
+  'finland': 'FI',
+  'poland': 'PL',
+  'czech republic': 'CZ',
+  'hungary': 'HU',
+  'turkey': 'TR',
+  'saudi arabia': 'SA',
+  'uae': 'AE', 'united arab emirates': 'AE',
+  'south africa': 'ZA',
+  'argentina': 'AR',
+  'chile': 'CL',
+  'ukraine': 'UA',
+};
+
+/**
+ * Calendarific holiday type strings that represent a true country-wide public holiday.
+ * Deliberately excludes 'Common local holiday', 'State holiday', 'Local holiday',
+ * 'Observance', 'Optional holiday', etc. so that US state-specific days are not counted.
+ */
+const NATIONAL_HOLIDAY_TYPE_ALLOWLIST = new Set([
+  'national holiday',
+  'public holiday',
+  'federal holiday',
+]);
+
+/**
+ * Given a raw Calendarific holidays array, returns the number of UNIQUE calendar days
+ * that have at least one country-wide national/public holiday.
+ * - Only counts holidays whose type is exactly in NATIONAL_HOLIDAY_TYPE_ALLOWLIST
+ * - Collapses multiple holidays on the same date into 1
+ */
+const countUniqueNationalHolidayDays = (rawHolidays) => {
+  const uniqueDates = new Set();
+  for (const h of rawHolidays) {
+    const types = Array.isArray(h.type) ? h.type : [];
+    const isNationwide = types.some(
+      (t) => NATIONAL_HOLIDAY_TYPE_ALLOWLIST.has(String(t).toLowerCase().trim())
+    );
+    if (!isNationwide) continue;
+    const isoDate = h.date?.iso;
+    if (isoDate) uniqueDates.add(isoDate.slice(0, 10)); // normalise to YYYY-MM-DD
+  }
+  return uniqueDates.size;
+};
+
+/**
+ * Returns the Calendarific national holiday count for a given ISO country, year, and month.
+ * Returns null if the API key is not configured or the request fails.
+ * Multiple holidays on the same date are counted as 1.
+ */
+const fetchCalendarificHolidayCountForCountry = async (isoCode, year, month) => {
+  const apiKey = process.env.CALENDARIFIC_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const response = await axios.get(CALENDARIFIC_BASE_URL, {
+      params: { api_key: apiKey, country: isoCode, year, month, type: 'national' },
+      timeout: 10000,
+    });
+    return countUniqueNationalHolidayDays(response.data?.response?.holidays || []);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Fetches the top nationalities from Panglao ITDMS for a given month/year.
+ * Skips "Philippines" and "Others" entries.
+ */
+const fetchPanglaoTopNationalities = async (year, month) => {
+  const response = await axios.get(PANGLAO_TOP_NATIONALITIES_API_URL, {
+    params: { year, month },
+    timeout: 15000,
+  });
+  const entries = response.data?.data?.top_10_nationalities || [];
+  return entries.filter((entry) => {
+    const name = String(entry.nationality || '').toLowerCase().trim();
+    return name !== 'philippines' && name !== 'others' && name !== 'philippines and others';
+  });
+};
+
+/**
+ * Parses the Top10MH.csv into structured objects.
+ * Returns an array of { year, month, countries: [{name, count}], total }
+ */
+const parseTop10CsvEntries = () => {
+  const raw = fs.existsSync(TOP10_MARKET_HOLIDAYS_CSV_PATH)
+    ? fs.readFileSync(TOP10_MARKET_HOLIDAYS_CSV_PATH, 'utf8').trim()
+    : '';
+  if (!raw) return [];
+
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const parsed = [];
+
+  for (let i = 0; i < lines.length - 1; i += 2) {
+    const headers = lines[i].split(',').map((v) => v.trim());
+    const values = lines[i + 1].split(',').map((v) => v.trim());
+
+    const year = Number(headers[0]);
+    const monthName = String(headers[1] || '').toLowerCase();
+    const month = MONTH_NAME_TO_NUMBER[monthName];
+    if (!Number.isInteger(year) || !Number.isInteger(month)) continue;
+
+    const lastIdx = headers.length - 1;
+    const hasTotal = String(headers[lastIdx] || '').toLowerCase() === 'total';
+    const countriesEnd = hasTotal ? lastIdx - 1 : lastIdx;
+    const total = hasTotal ? Number(values[lastIdx] || 0) : 0;
+
+    const countries = [];
+    for (let col = 2; col <= countriesEnd; col++) {
+      const name = String(headers[col] || '').trim();
+      if (name) countries.push({ name, count: Number(values[col] || 0) });
+    }
+
+    parsed.push({ year, month, countries, total });
+  }
+
+  return parsed;
+};
+
+/**
+ * Serialises a list of parsed entries back into the Top10MH.csv format,
+ * sorted by year then month.
+ */
+const serialiseTop10CsvEntries = (entries) => {
+  const sorted = [...entries].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  const MONTH_NUMBER_TO_NAME = Object.entries(MONTH_NAME_TO_NUMBER)
+    .reduce((acc, [name, num]) => { acc[num] = name.charAt(0).toUpperCase() + name.slice(1); return acc; }, {});
+
+  return sorted.map(({ year, month, countries, total }) => {
+    const header = [year, MONTH_NUMBER_TO_NAME[month], ...countries.map((c) => c.name), 'Total'].join(',');
+    const values = ['', '', ...countries.map((c) => String(c.count)), String(total)].join(',');
+    return `${header}\n${values}`;
+  }).join('\n');
+};
+
+/**
+ * Adds a new (year, month) entry to Top10MH.csv only if it does not already exist.
+ * Always re-writes the file in sorted order.
+ * Returns all records for the given (year, month) after the operation.
+ */
+const upsertTop10MarketHolidaysToCsv = (year, month, countries, total) => {
+  const entries = parseTop10CsvEntries();
+  const exists = entries.some((e) => e.year === year && e.month === month);
+
+  if (!exists) {
+    entries.push({ year, month, countries, total });
+    fs.writeFileSync(TOP10_MARKET_HOLIDAYS_CSV_PATH, serialiseTop10CsvEntries(entries), 'utf8');
+  }
+
+  // Return full records (including the existing data for this month)
+  const entry = exists
+    ? entries.find((e) => e.year === year && e.month === month)
+    : { year, month, countries, total };
+
+  return (entry?.countries || []).map((c, idx) => ({
+    year,
+    month,
+    rank: idx + 1,
+    country: c.name,
+    holidayCount: c.count,
+    totalHolidays: entry.total,
+  }));
+};
+
 const readHistoricalDatasetFromCsv = () => {
   const raw = fs.readFileSync(HISTORICAL_DATASET_CSV_PATH, 'utf8').trim();
   if (!raw) return [];
@@ -351,11 +550,12 @@ const fetchPhilippineHolidayCountFromCalendarific = async (year, month) => {
       country: 'PH',
       year,
       month,
+      type: 'national',
     },
     timeout: 10000,
   });
 
-  return (response.data?.response?.holidays || []).length;
+  return countUniqueNationalHolidayDays(response.data?.response?.holidays || []);
 };
 
 const fetchPanglaoCheckinsSubmission = async (year, month) => {
@@ -1088,6 +1288,7 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
       api_key: apiKey,
       country: 'PH',
       year,
+      type: 'national',
     };
 
     if (month !== undefined) {
@@ -1099,15 +1300,28 @@ app.get('/api/holidays/philippines', async (req, res, next) => {
       timeout: 10000,
     });
 
-    const holidays = (response.data?.response?.holidays || []).map((holiday) => ({
-      name: holiday.name,
-      description: holiday.description || '',
-      date: holiday.date?.iso,
-      month: holiday.date?.datetime?.month,
-      day: holiday.date?.datetime?.day,
-      type: Array.isArray(holiday.type) ? holiday.type : [],
-      primaryType: Array.isArray(holiday.type) && holiday.type.length > 0 ? holiday.type[0] : 'unknown',
-    }));
+    // Deduplicate: keep only country-wide national/public holidays, one entry per calendar date
+    const seenDates = new Set();
+    const holidays = (response.data?.response?.holidays || []).reduce((acc, holiday) => {
+      const types = Array.isArray(holiday.type) ? holiday.type : [];
+      const isNationwide = types.some(
+        (t) => NATIONAL_HOLIDAY_TYPE_ALLOWLIST.has(String(t).toLowerCase().trim())
+      );
+      if (!isNationwide) return acc;
+      const isoDate = holiday.date?.iso ? holiday.date.iso.slice(0, 10) : null;
+      if (!isoDate || seenDates.has(isoDate)) return acc;
+      seenDates.add(isoDate);
+      acc.push({
+        name: holiday.name,
+        description: holiday.description || '',
+        date: holiday.date?.iso,
+        month: holiday.date?.datetime?.month,
+        day: holiday.date?.datetime?.day,
+        type: types,
+        primaryType: types.length > 0 ? types[0] : 'unknown',
+      });
+      return acc;
+    }, []);
 
     if (month !== undefined) {
       await cachePhilippineHolidayCount(year, month, holidays.length);
@@ -1179,6 +1393,7 @@ app.post('/api/holidays/philippines/cache-range', async (req, res, next) => {
             country: 'PH',
             year,
             month,
+            type: 'national',
           },
           timeout: 10000,
         });
@@ -1186,7 +1401,7 @@ app.post('/api/holidays/philippines/cache-range', async (req, res, next) => {
         const holidays = Array.isArray(response.data?.response?.holidays)
           ? response.data.response.holidays
           : [];
-        const count = holidays.length;
+        const count = countUniqueNationalHolidayDays(holidays);
         await cachePhilippineHolidayCount(year, month, count);
         cached.push({ year, month, count, source: 'calendarific' });
       }
@@ -1204,9 +1419,66 @@ app.post('/api/holidays/philippines/cache-range', async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/datasets/tourism/top10-market-holidays/sync
+ * Fetches the top visiting nationalities from Panglao ITDMS for the given month/year,
+ * looks up each country's holiday count via Calendarific, and stores the result in
+ * Top10MH.csv — but only when no entry exists for that month yet.
+ * If data already exists it is returned unchanged.
+ */
+app.post('/api/datasets/tourism/top10-market-holidays/sync', async (req, res, next) => {
+  try {
+    const year = Number(req.body.year);
+    const month = Number(req.body.month);
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'year must be an integer between 2000 and 2100' });
+    }
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
+    }
+
+    // If data already exists, return it without touching the CSV
+    const existing = readTop10MarketHolidaysFromCsv().filter(
+      (r) => r.year === year && r.month === month
+    );
+    if (existing.length > 0) {
+      return res.json({ source: 'csv', records: existing });
+    }
+
+    // Fetch nationalities from Panglao ITDMS
+    const nationalities = await fetchPanglaoTopNationalities(year, month);
+
+    if (!nationalities.length) {
+      return res.status(422).json({ error: 'No nationalities returned from Panglao ITDMS API for the given period' });
+    }
+
+    // Fetch holiday count per country from Calendarific
+    const countriesWithHolidays = await Promise.all(
+      nationalities.map(async (entry) => {
+        const normalizedName = String(entry.nationality || '').trim();
+        const isoCode = COUNTRY_NAME_TO_ISO[normalizedName.toLowerCase()] || null;
+        let holidayCount = 0;
+        if (isoCode) {
+          const count = await fetchCalendarificHolidayCountForCountry(isoCode, year, month);
+          holidayCount = count ?? 0;
+        }
+        return { name: normalizedName, count: holidayCount };
+      })
+    );
+
+    const total = countriesWithHolidays.reduce((sum, c) => sum + c.count, 0);
+
+    const records = upsertTop10MarketHolidaysToCsv(year, month, countriesWithHolidays, total);
+    return res.json({ source: 'panglao-itdms', records });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(500).json({ error: 'Internal server error', details: error.message });
+  res.status(error.status || 500).json({ error: error.message || 'Internal server error' });
 });
 
 ensureHolidayCacheTable().catch((error) => {

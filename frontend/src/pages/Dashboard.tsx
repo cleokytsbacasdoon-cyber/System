@@ -19,6 +19,7 @@ import {
   getCheckinsSubmission,
   CheckinsSubmissionData,
   upsertMonthlyTourismDataset,
+  syncTop10MarketHolidaysFromPanglao,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
@@ -31,7 +32,7 @@ interface DashboardProps {
 interface TouristTrendParameter {
   label: string;
   value: string;
-  holidayRows?: Array<{ country: string; holidayCount: number }>;
+  holidayRows?: Array<{ rank: number; country: string; holidayCount: number }>;
   totalHolidays?: number | null;
 }
 
@@ -161,7 +162,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [dashboardHolidayCountApi, setDashboardHolidayCountApi] = useState<number | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ml-notifications') ?? '[]') as NotificationItem[]; }
+    catch { return []; }
+  });
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [baseModelNameInput, setBaseModelNameInput] = useState('xgboost_base');
   const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
@@ -171,12 +175,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [manualInflationRate, setManualInflationRate] = useState('');
   const [manualIsLockdown, setManualIsLockdown] = useState<'yes' | 'no'>('no');
   const [isSavingManualFields, setIsSavingManualFields] = useState(false);
+  const [autoRetrainingEnabled, setAutoRetrainingEnabled] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem('ml-auto-retrain-enabled') ?? 'true') as boolean; }
+    catch { return true; }
+  });
   const [weatherLatencyMs, setWeatherLatencyMs] = useState<number | null>(null);
+  const [nationalitiesApiLatencyMs, setNationalitiesApiLatencyMs] = useState<number | null>(null);
   const [holidayLatencyMs, setHolidayLatencyMs] = useState<number | null>(null);
   const [panglaoLatencyMs, setPanglaoLatencyMs] = useState<number | null>(null);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
   const knownAlertIdsRef = useRef<Set<string>>(new Set());
   const previousEndpointStatusRef = useRef<Map<string, APIEndpoint['status']>>(new Map());
+  const schedulerStateRef = useRef<{ lastCheckedDay: string | null; pendingRetrainSince: string | null }>(
+    (() => {
+      try { return JSON.parse(localStorage.getItem('ml-auto-retrain-scheduler') ?? 'null') ?? { lastCheckedDay: null, pendingRetrainSince: null }; }
+      catch { return { lastCheckedDay: null, pendingRetrainSince: null }; }
+    })()
+  );
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -357,6 +372,104 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const addNotification = useCallback((item: NotificationItem) => {
     setNotifications((prev) => [item, ...prev.filter((existing) => existing.id !== item.id)].slice(0, 20));
   }, []);
+
+  // Persist notifications + autoRetrainingEnabled across page refreshes
+  useEffect(() => {
+    localStorage.setItem('ml-notifications', JSON.stringify(notifications));
+  }, [notifications]);
+
+  useEffect(() => {
+    localStorage.setItem('ml-auto-retrain-enabled', JSON.stringify(autoRetrainingEnabled));
+  }, [autoRetrainingEnabled]);
+
+  /**
+   * Auto-retraining scheduler:
+   * - Fires on the 10th of every month at 23:59
+   * - If submission rate < 70 %: skip, notify, and retry every subsequent day at 23:59
+   * - If submission rate >= 70 %: run retraining, notify success, clear pending state
+   * - Persists check state in localStorage so retries survive page refreshes
+   */
+  const runAutoRetrainCheck = useCallback(async () => {
+    if (!autoRetrainingEnabled) return;
+
+    const now = new Date();
+    // Only fire at 23:59
+    if (now.getHours() !== 23 || now.getMinutes() !== 59) return;
+
+    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const sched = schedulerStateRef.current;
+
+    // Already handled today — skip
+    if (sched.lastCheckedDay === todayStr) return;
+
+    const isScheduledDay = now.getDate() === 10;
+    const isRetryDay = sched.pendingRetrainSince !== null;
+
+    if (!isScheduledDay && !isRetryDay) return;
+
+    // Mark today as processed immediately to prevent duplicate triggers within the same minute
+    sched.lastCheckedDay = todayStr;
+    localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
+
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+const monthLabel = `${months[now.getMonth()]} ${year}`;
+
+    try {
+      const submission = await getCheckinsSubmission(year, month);
+      const rate = submission.submissionRatePercentage;
+
+      if (rate >= 70) {
+        // Trigger retraining for the current month
+        await simulateMonthlyRetraining({ baseModelName: 'xgboost_base', month, year });
+
+        // Clear retry state — next run is the 10th of next month
+        sched.pendingRetrainSince = null;
+        localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
+
+        addNotification({
+          id: `auto-retrain-success-${todayStr}`,
+          title: 'Auto-Retraining Completed',
+          description: `Scheduled auto-retraining for ${monthLabel} completed. Submission rate: ${rate.toFixed(2)}%. Next run: 10th of next month at 11:59 PM.`,
+          timestamp: now.toISOString(),
+        });
+        addToast('Scheduled auto-retraining completed successfully', 'success');
+        await loadData();
+      } else {
+        // Record the first failed attempt date (keep existing if already set)
+        if (!sched.pendingRetrainSince) {
+          sched.pendingRetrainSince = todayStr;
+          localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
+        }
+
+        addNotification({
+          id: `auto-retrain-skipped-${todayStr}`,
+          title: 'Auto-Retraining Skipped',
+          description: `Auto-retraining for ${monthLabel} was skipped — submission rate ${rate.toFixed(2)}% is below 70%. Will retry tomorrow at 11:59 PM.`,
+          timestamp: now.toISOString(),
+        });
+      }
+    } catch (err) {
+      // On error, keep pendingRetrainSince so we retry tomorrow
+      if (!sched.pendingRetrainSince) {
+        sched.pendingRetrainSince = todayStr;
+        localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
+      }
+      addNotification({
+        id: `auto-retrain-error-${todayStr}`,
+        title: 'Auto-Retraining Failed',
+        description: `Scheduled retraining check failed: ${err instanceof Error ? err.message : 'Unknown error'}. Will retry tomorrow at 11:59 PM.`,
+        timestamp: now.toISOString(),
+      });
+    }
+  }, [autoRetrainingEnabled, addNotification, addToast, loadData, months]);
+
+  // Run scheduler every minute; also evaluate on mount to catch a missed window
+  useEffect(() => {
+    runAutoRetrainCheck();
+    const intervalId = setInterval(runAutoRetrainCheck, 60_000);
+    return () => clearInterval(intervalId);
+  }, [runAutoRetrainCheck]);
 
   const deriveAlertTitle = useCallback((alert: DriftAlert) => {
     if (alert.title && alert.title.trim()) return alert.title.trim();
@@ -549,6 +662,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     syncFutureMonthFromPanglao();
   }, [addNotification, dashboardMonth, dashboardYear, selectedMonthlyTourismRecord]);
 
+  // Sync Top-10 Market Holidays from Panglao ITDMS top-nationalities API
+  // when no existing CSV data is found for the selected month/year.
+  useEffect(() => {
+    if (top10MarketHolidayForSelectedMonth.length > 0) {
+      // Already have data — nothing to do
+      return;
+    }
+
+    const syncTop10 = async () => {
+      try {
+        const startedAt = performance.now();
+        const result = await syncTop10MarketHolidaysFromPanglao(dashboardYear, dashboardMonth + 1);
+        setNationalitiesApiLatencyMs(Math.round(performance.now() - startedAt));
+
+        if (result.records.length > 0) {
+          // Refresh the global top10 data from backend so the new CSV rows are visible
+          const refreshed = await getTop10MarketHolidays();
+          setTop10MarketHolidayData(refreshed);
+
+          addNotification({
+            id: `top10-sync-${dashboardYear}-${dashboardMonth + 1}`,
+            title: 'Top 10 Market Holidays Synced',
+            description: `Holiday data for ${months[dashboardMonth]} ${dashboardYear} was fetched from Panglao ITDMS top-nationalities API and saved.`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch {
+        setNationalitiesApiLatencyMs(null);
+      }
+    };
+
+    syncTop10();
+  }, [addNotification, dashboardMonth, dashboardYear, months, top10MarketHolidayForSelectedMonth]);
+
   useEffect(() => {
     if (selectedMonthlyTourismRecord?.philippineHolidayCount !== null && selectedMonthlyTourismRecord?.philippineHolidayCount !== undefined) {
       setDashboardHolidayCountApi(selectedMonthlyTourismRecord.philippineHolidayCount);
@@ -667,7 +814,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [nextMonthDate, tourismTrendForecasts]);
 
   const top10MarketHolidayRows = useMemo(
-    () => top10MarketHolidayForSelectedMonth.map((item) => ({ country: item.country, holidayCount: item.holidayCount })),
+    () => top10MarketHolidayForSelectedMonth.map((item) => ({ rank: item.rank, country: item.country, holidayCount: item.holidayCount })),
     [top10MarketHolidayForSelectedMonth]
   );
 
@@ -793,8 +940,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         status: futureCheckinsSubmission !== null ? 'active' : 'inactive',
         latencyMs: panglaoLatencyMs,
       },
+      {
+        id: 'panglao-itdms-nationalities',
+        name: 'Panglao ITDMS — Top Nationalities',
+        usedFor: 'Top visiting nationalities per month used to derive Top 10 Market Holidays when no CSV data exists.',
+        status: nationalitiesApiLatencyMs !== null ? 'active' : (top10MarketHolidayForSelectedMonth.length > 0 ? 'active' : 'inactive'),
+        latencyMs: nationalitiesApiLatencyMs,
+      },
     ],
-    [dashboardHolidayCountApi, futureCheckinsSubmission, holidayLatencyMs, panglaoLatencyMs, weatherData?.source, weatherLatencyMs]
+    [dashboardHolidayCountApi, futureCheckinsSubmission, holidayLatencyMs, nationalitiesApiLatencyMs, panglaoLatencyMs, top10MarketHolidayForSelectedMonth.length, weatherData?.source, weatherLatencyMs]
   );
 
   useEffect(() => {
@@ -1159,7 +1313,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                               <div className="mt-3 space-y-1.5 max-h-[22rem] overflow-auto pr-1">
                                 {parameter.holidayRows.map((row) => (
                                   <div key={row.country} className="flex items-center justify-between gap-3 text-lg text-sky-500 leading-6">
-                                    <span className="font-semibold text-left">{row.country}</span>
+                                    <span className="font-semibold text-left flex items-center gap-1.5">
+                                      <span className={`text-xs w-5 text-center font-bold shrink-0 ${isDarkMode ? 'text-slate-400' : 'text-gray-400'}`}>{row.rank}.</span>
+                                      {row.country}
+                                    </span>
                                     <span className="font-semibold text-right whitespace-nowrap">
                                       {row.holidayCount} {row.holidayCount === 1 ? 'holiday' : 'holidays'}
                                     </span>
@@ -1249,95 +1406,234 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     </p>
                   </div>
 
-                  <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
-                    <h3 className="text-lg font-semibold mb-2">Monthly Auto-Retraining Simulator (XGBoost)</h3>
-                    <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      Choose a base model and cutoff date. Training will use all rows from the oldest record up to the selected month and year.
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <div>
-                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Base Model Name</label>
-                        <input
-                          type="text"
-                          value={baseModelNameInput}
-                          onChange={(e) => setBaseModelNameInput(e.target.value)}
-                          placeholder="xgboost_base"
-                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                        />
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                    {/* Monthly Auto-Retraining Simulator */}
+                    <div className={`rounded-lg border p-4 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
+                      <h3 className="text-lg font-semibold mb-2">Monthly Auto-Retraining Simulator (XGBoost)</h3>
+                      <p className={`text-sm mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Choose a base model and cutoff date. Training will use all rows from the oldest record up to the selected month and year.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div>
+                          <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Base Model Name</label>
+                          <input
+                            type="text"
+                            value={baseModelNameInput}
+                            onChange={(e) => setBaseModelNameInput(e.target.value)}
+                            placeholder="xgboost_base"
+                            className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Month</label>
+                          <select
+                            value={simulateMonth}
+                            onChange={(e) => setSimulateMonth(Number(e.target.value))}
+                            className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          >
+                            {months.map((monthName, index) => (
+                              <option key={monthName} value={index + 1}>{monthName}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Year</label>
+                          <input
+                            type="number"
+                            value={simulateYear}
+                            onChange={(e) => setSimulateYear(Number(e.target.value))}
+                            className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            onClick={handleSimulateMonthlyRetraining}
+                            disabled={isSimulating}
+                            className="w-full px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 disabled:opacity-60"
+                          >
+                            {isSimulating ? 'Training...' : 'Train XGBoost'}
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Month</label>
-                        <select
-                          value={simulateMonth}
-                          onChange={(e) => setSimulateMonth(Number(e.target.value))}
-                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                        >
-                          {months.map((monthName, index) => (
-                            <option key={monthName} value={index + 1}>{monthName}</option>
-                          ))}
-                        </select>
+                      <div className={`mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
+                        <div>
+                          <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Inflation Rate (manual)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={manualInflationRate}
+                            onChange={(e) => setManualInflationRate(e.target.value)}
+                            onBlur={() => persistCutoffManualFields(manualInflationRate, manualIsLockdown)}
+                            placeholder="e.g. 2.50"
+                            className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          />
+                          <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Saved automatically for selected cutoff month/year on blur.
+                          </p>
+                        </div>
+                        <div>
+                          <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>is Lockdown (manual)</label>
+                          <select
+                            value={manualIsLockdown}
+                            onChange={(e) => {
+                              const value = e.target.value as 'yes' | 'no';
+                              setManualIsLockdown(value);
+                              persistCutoffManualFields(manualInflationRate, value);
+                            }}
+                            className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
+                          >
+                            <option value="no">No</option>
+                            <option value="yes">Yes</option>
+                          </select>
+                          <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Default is No. Changes are auto-saved to the selected cutoff month/year.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Cutoff Year</label>
-                        <input
-                          type="number"
-                          value={simulateYear}
-                          onChange={(e) => setSimulateYear(Number(e.target.value))}
-                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                        />
-                      </div>
-                      <div className="flex items-end">
-                        <button
-                          onClick={handleSimulateMonthlyRetraining}
-                          disabled={isSimulating}
-                          className="w-full px-4 py-2 bg-primary text-white rounded hover:bg-blue-600 disabled:opacity-60"
-                        >
-                          {isSimulating ? 'Training...' : 'Train XGBoost'}
-                        </button>
+                      {isSavingManualFields && (
+                        <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Saving inflation/lockdown values...</p>
+                      )}
+                      <div className={`mt-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                        <p className="text-xs">Generated model name</p>
+                        <p className="text-sm font-semibold break-all">{generatedModelNamePreview}</p>
                       </div>
                     </div>
-                    <div className={`mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900' : 'border-gray-200 bg-gray-50'}`}>
-                      <div>
-                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Inflation Rate (manual)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={manualInflationRate}
-                          onChange={(e) => setManualInflationRate(e.target.value)}
-                          onBlur={() => persistCutoffManualFields(manualInflationRate, manualIsLockdown)}
-                          placeholder="e.g. 2.50"
-                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                        />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          Saved automatically for selected cutoff month/year on blur.
-                        </p>
-                      </div>
-                      <div>
-                        <label className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>is Lockdown (manual)</label>
-                        <select
-                          value={manualIsLockdown}
-                          onChange={(e) => {
-                            const value = e.target.value as 'yes' | 'no';
-                            setManualIsLockdown(value);
-                            persistCutoffManualFields(manualInflationRate, value);
-                          }}
-                          className={`mt-1 w-full p-2 rounded border outline-none text-sm ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                        >
-                          <option value="no">No</option>
-                          <option value="yes">Yes</option>
-                        </select>
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          Default is No. Changes are auto-saved to the selected cutoff month/year.
-                        </p>
-                      </div>
-                    </div>
-                    {isSavingManualFields && (
-                      <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Saving inflation/lockdown values...</p>
-                    )}
-                    <div className={`mt-3 p-3 rounded border ${isDarkMode ? 'border-slate-700 bg-slate-900 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
-                      <p className="text-xs">Generated model name</p>
-                      <p className="text-sm font-semibold break-all">{generatedModelNamePreview}</p>
-                    </div>
+
+                    {/* Model Retraining Status Box */}
+                    {(() => {
+                      const sortedModels = [...trainedModels].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                      const lastRetrainedModel = sortedModels[0] ?? null;
+                      const currentModel = trainedModels.find(m => m.inUse) ?? lastRetrainedModel;
+                      const lastRetrainDate = lastRetrainedModel ? new Date(lastRetrainedModel.createdAt) : null;
+                      // Next scheduled:
+                      // - If in pending-retry mode: tomorrow at 23:59
+                      // - Otherwise: 10th of current month if not yet passed, else 10th of next month
+                      const nextScheduled = (() => {
+                        const now = new Date();
+                        if (schedulerStateRef.current.pendingRetrainSince) {
+                          const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 0);
+                          return tomorrow;
+                        }
+                        const thisMonth10 = new Date(now.getFullYear(), now.getMonth(), 10, 23, 59, 0);
+                        return now < thisMonth10
+                          ? thisMonth10
+                          : new Date(now.getFullYear(), now.getMonth() + 1, 10, 23, 59, 0);
+                      })();
+                      const pendingRetrainSince = schedulerStateRef.current.pendingRetrainSince;
+                      const formatDate = (d: Date) =>
+                        d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <div className={`rounded-lg border p-4 flex flex-col gap-4 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
+                          {/* Header */}
+                          <div className="flex items-center gap-2">
+                            <svg className="h-5 w-5 text-sky-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M21 2v6h-6" />
+                              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                              <path d="M3 22v-6h6" />
+                              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                            </svg>
+                            <h3 className="text-lg font-semibold">Model Retraining</h3>
+                          </div>
+
+                          {/* Automated Retraining toggle */}
+                          <div className={`flex items-center justify-between rounded-lg p-3 ${isDarkMode ? 'bg-slate-700' : 'bg-gray-50'}`}>
+                            <div>
+                              <p className="font-semibold text-sm">Automated Retraining</p>
+                              <p className={`text-xs mt-0.5 ${autoRetrainingEnabled ? (pendingRetrainSince ? 'text-amber-500' : 'text-green-500') : isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                {autoRetrainingEnabled
+                                  ? pendingRetrainSince
+                                    ? 'Pending retry — submission rate < 70%'
+                                    : 'Active — runs on the 10th at 11:59 PM'
+                                  : 'Disabled'}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setAutoRetrainingEnabled(prev => !prev)}
+                              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
+                                autoRetrainingEnabled
+                                  ? isDarkMode ? 'bg-slate-900 text-white hover:bg-slate-950' : 'bg-gray-900 text-white hover:bg-black'
+                                  : 'bg-green-600 text-white hover:bg-green-700'
+                              }`}
+                            >
+                              {autoRetrainingEnabled ? (
+                                <>
+                                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                                    <rect x="14" y="5" width="4" height="14" rx="1" />
+                                  </svg>
+                                  Disable
+                                </>
+                              ) : (
+                                <>
+                                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                  </svg>
+                                  Enable
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Last Retrain / Next Scheduled */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className={`rounded-lg p-3 border ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                              <p className={`text-xs ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>Last Retrain</p>
+                              <p className="mt-1 font-bold text-sm">
+                                {lastRetrainDate ? formatDate(lastRetrainDate) : '—'}
+                              </p>
+                            </div>
+                            <div className={`rounded-lg p-3 border ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                              <p className={`text-xs ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>Next Scheduled</p>
+                              <p className="mt-1 font-bold text-sm">
+                                {autoRetrainingEnabled ? formatDate(nextScheduled) : '—'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Pending retry banner */}
+                          {autoRetrainingEnabled && pendingRetrainSince && (
+                            <div className={`rounded-lg p-3 border flex items-start gap-2 ${isDarkMode ? 'bg-amber-950 border-amber-800 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+                              <svg className="h-4 w-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                              </svg>
+                              <p className="text-xs">Submission rate was below 70% on <strong>{pendingRetrainSince}</strong>. Retrying daily at 11:59 PM until threshold is met.</p>
+                            </div>
+                          )}
+
+                          {/* Current Model */}
+                          <div className={`rounded-lg p-3 border flex items-center gap-3 ${isDarkMode ? 'bg-blue-950 border-blue-800' : 'bg-blue-50 border-blue-200'}`}>
+                            <svg className="h-5 w-5 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <ellipse cx="12" cy="5" rx="9" ry="3" />
+                              <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+                              <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+                            </svg>
+                            <div>
+                              <p className={`text-xs font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>Current Model</p>
+                              <p className="text-sm font-semibold break-all">
+                                {currentModel ? currentModel.modelName : 'No model in use'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Manual Retrain */}
+                          <button
+                            onClick={handleSimulateMonthlyRetraining}
+                            disabled={isSimulating}
+                            className={`mt-auto w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border font-semibold text-sm transition-colors disabled:opacity-60 ${isDarkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M21 2v6h-6" />
+                              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                              <path d="M3 22v-6h6" />
+                              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                            </svg>
+                            {isSimulating ? 'Training...' : 'Manual Retrain'}
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
