@@ -920,18 +920,26 @@ app.post('/api/ml/retrain', async (req, res, next) => {
 
 app.get('/api/ml/trained-models', async (_req, res, next) => {
   try {
+    // Show all retrained models; exclude transient winner-marker rows
     const result = await query(
-      "SELECT * FROM model_versions WHERE lower(version) LIKE 'xgboost%' ORDER BY deploy_date DESC"
+      "SELECT * FROM model_versions WHERE lower(version) NOT LIKE '%_winner_%' ORDER BY deploy_date DESC"
     );
 
-    const models = result.rows.map((row) => ({
-      id: row.id,
-      modelName: row.version,
-      createdAt: row.deploy_date,
-      accuracy: row.accuracy !== null ? Number(row.accuracy) : undefined,
-      inUse: row.status === 'active',
-      algorithm: 'XGBoost',
-    }));
+    const models = result.rows.map((row) => {
+      const ver = (row.version || '').toLowerCase();
+      const algorithm = ver.startsWith('lstm') ? 'LSTM'
+        : ver.startsWith('random_forest') ? 'Random Forest'
+        : ver.startsWith('prophet') ? 'Prophet'
+        : 'XGBoost';
+      return {
+        id: row.id,
+        modelName: row.version,
+        createdAt: row.deploy_date,
+        accuracy: row.accuracy !== null ? Number(row.accuracy) : undefined,
+        inUse: row.status === 'active',
+        algorithm,
+      };
+    });
 
     res.json(models);
   } catch (error) {
@@ -947,25 +955,34 @@ app.post('/api/ml/trained-models/:id/use', async (req, res, next) => {
     }
 
     const version = target.rows[0].version;
-    const selectedModelFile = resolveModelFileByVersion(version);
-    const selectedMetadataFile = resolveMetadataFileByVersion(version);
 
-    const status = getModelStatus();
-    if (!fs.existsSync(selectedModelFile) || !fs.existsSync(selectedMetadataFile)) {
-      return res.status(400).json({
-        error: 'Model artifact files are missing',
-        details: { selectedModelFile, selectedMetadataFile },
-      });
+    // Only XGBoost has local model artifact files — skip file copy for other model types
+    if (version.toLowerCase().startsWith('xgboost')) {
+      const selectedModelFile = resolveModelFileByVersion(version);
+      const selectedMetadataFile = resolveMetadataFileByVersion(version);
+      const status = getModelStatus();
+      if (!fs.existsSync(selectedModelFile) || !fs.existsSync(selectedMetadataFile)) {
+        return res.status(400).json({
+          error: 'Model artifact files are missing',
+          details: { selectedModelFile, selectedMetadataFile },
+        });
+      }
+      fs.copyFileSync(selectedModelFile, status.localModelFile);
+      fs.copyFileSync(selectedMetadataFile, status.localMetadataFile);
     }
 
-    fs.copyFileSync(selectedModelFile, status.localModelFile);
-    fs.copyFileSync(selectedMetadataFile, status.localMetadataFile);
-
-    await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'");
+    // Archive ALL model versions before activating the selected one
+    await query("UPDATE model_versions SET status = 'archived'");
     const updated = await query(
       "UPDATE model_versions SET status = 'active', deploy_date = NOW() WHERE id = $1 RETURNING *",
       [req.params.id]
     );
+
+    const ver = (updated.rows[0].version || '').toLowerCase();
+    const algorithm = ver.startsWith('lstm') ? 'LSTM'
+      : ver.startsWith('random_forest') ? 'Random Forest'
+      : ver.startsWith('prophet') ? 'Prophet'
+      : 'XGBoost';
 
     res.json({
       id: updated.rows[0].id,
@@ -973,7 +990,7 @@ app.post('/api/ml/trained-models/:id/use', async (req, res, next) => {
       createdAt: updated.rows[0].deploy_date,
       accuracy: updated.rows[0].accuracy !== null ? Number(updated.rows[0].accuracy) : undefined,
       inUse: true,
-      algorithm: 'XGBoost',
+      algorithm,
     });
   } catch (error) {
     next(error);

@@ -4,7 +4,7 @@
   "algorithm": "xgboost",
   "cutoffYear": 2026,
   "cutoffMonth": 1,
-  "trainedAtUtc": "2026-04-11T15:53:22.282242Z",
+  "trainedAtUtc": "2026-04-12T07:24:58.831293Z",
   "datasetPath": "/app/db/2016 - 2025 datasets.csv",
   "modelPath": "/app/models/xgboost_base_january_2026.json",
   "featureOrder": [

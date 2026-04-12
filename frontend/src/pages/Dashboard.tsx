@@ -15,7 +15,6 @@ import {
   getTop10MarketHolidays,
   getTrainedModels,
   useTrainedModel,
-  simulateMonthlyRetraining,
   getCheckinsSubmission,
   CheckinsSubmissionData,
   upsertMonthlyTourismDataset,
@@ -172,14 +171,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     catch { return []; }
   });
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
-  const [baseModelNameInput, setBaseModelNameInput] = useState('xgboost_base');
   const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
-  const [simulateMonth, setSimulateMonth] = useState(new Date().getMonth() + 1);
-  const [simulateYear, setSimulateYear] = useState(new Date().getFullYear());
+  const [simulateMonth, setSimulateMonth] = useState(() => {
+    const now = new Date();
+    // Default to previous month so manual retrain targets the same period as auto-retrain
+    return now.getMonth() === 0 ? 12 : now.getMonth(); // getMonth() is 0-indexed, so no +1 = previous month
+  });
+  const [simulateYear, setSimulateYear] = useState(() => {
+    const now = new Date();
+    return now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  });
   const [isSimulating, setIsSimulating] = useState(false);
   const [manualInflationRate, setManualInflationRate] = useState('');
   const [manualIsLockdown, setManualIsLockdown] = useState<'yes' | 'no'>('no');
-  const [isSavingManualFields, setIsSavingManualFields] = useState(false);
   const [autoRetrainingEnabled, setAutoRetrainingEnabled] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem('ml-auto-retrain-enabled') ?? 'true') as boolean; }
     catch { return true; }
@@ -212,20 +216,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   };
   const getModelLabel = (id: string) =>
     MODEL_LABELS[id] ?? id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const formatModelVersion = (version: string): string => {
+    const mNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+    const parts = version.toLowerCase().split('_');
+    const mIdx = parts.findIndex(p => mNames.includes(p));
+    if (mIdx === -1) return version;
+    const month = parts[mIdx];
+    const year = parts[mIdx + 1] ?? '';
+    const prefix = parts.slice(0, mIdx).filter(p => p !== 'base' && p !== 'eval' && p !== 'winner').join('_');
+    const label = MODEL_LABELS[prefix] ?? prefix.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return `${label}_${month.charAt(0).toUpperCase() + month.slice(1)}_${year}`;
+  };
   const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);
-  const normalizedBaseModelName = useMemo(
-    () =>
-      (baseModelNameInput || 'xgboost_base')
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '') || 'xgboost_base',
-    [baseModelNameInput]
-  );
-  const generatedModelNamePreview = useMemo(
-    () => `${normalizedBaseModelName}_${months[simulateMonth - 1].toLowerCase()}_${simulateYear}`,
-    [months, normalizedBaseModelName, simulateMonth, simulateYear]
-  );
 
   useEffect(() => {
     const clockTimer = setInterval(() => {
@@ -291,7 +293,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     try {
       setIsSimulating(true);
       const result: CompareAllRetrainResult = await retrainAndCompareAll({
-        baseModelName: baseModelNameInput,
+        baseModelName: 'xgboost_base',
         month: simulateMonth,
         year: simulateYear,
       });
@@ -331,48 +333,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       addToast(err instanceof Error ? err.message : 'Failed to generate prediction', 'error');
     }
   };
-
-  const persistCutoffManualFields = useCallback(async (nextInflationRate: string, nextLockdown: 'yes' | 'no') => {
-    if (simulateYear < 2026) {
-      return;
-    }
-
-    const normalizedInflation = nextInflationRate.trim();
-    const inflationValue = normalizedInflation === '' ? null : Number(normalizedInflation);
-    if (normalizedInflation !== '' && !Number.isFinite(inflationValue)) {
-      addToast('Inflation rate must be a valid number', 'error');
-      return;
-    }
-
-    try {
-      setIsSavingManualFields(true);
-      const startedAt = performance.now();
-      const panglaoData = await getCheckinsSubmission(simulateYear, simulateMonth);
-      setPanglaoLatencyMs(Math.round(performance.now() - startedAt));
-
-      if (!Number.isFinite(Number(panglaoData.totalCheckIns)) || Number(panglaoData.totalCheckIns) <= 0) {
-        addToast(`No Panglao check-ins data available yet for ${months[simulateMonth - 1]} ${simulateYear}`, 'error');
-        return;
-      }
-
-      await upsertMonthlyTourismDataset({
-        year: simulateYear,
-        month: simulateMonth,
-        arrivals: panglaoData.totalCheckIns,
-        inflationRate: inflationValue,
-        isLockdown: nextLockdown === 'yes',
-      });
-
-      const refreshed = await getMonthlyTourismDataset();
-      setMonthlyTourismData(refreshed);
-      setFutureCheckinsSubmission(panglaoData);
-      addToast(`Saved inflation/lockdown for ${months[simulateMonth - 1]} ${simulateYear}`, 'success');
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save inflation/lockdown values', 'error');
-    } finally {
-      setIsSavingManualFields(false);
-    }
-  }, [addToast, months, simulateMonth, simulateYear]);
 
   const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = parseInt(e.target.value, 10);
@@ -993,14 +953,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       {
         id: 'calendarific',
         name: 'Calendarific',
-        usedFor: 'Fetches Philippine national holiday counts per month used as a feature in model training and prediction.',
+        usedFor: 'Fetches data for Philippines and countries on the Top 10 Market Holidays featuring national holiday counts per month.',
         status: dashboardHolidayCountApi !== null ? 'active' : 'inactive',
         latencyMs: holidayLatencyMs,
       },
       {
         id: 'panglao-itdms',
         name: 'Panglao ITDMS',
-        usedFor: 'Fetches monthly tourist check-in totals and submission rates (2026+) for forecasting inputs, and top visiting nationalities used to derive Top 10 Market Holiday features.',
+        usedFor: 'Fetches data on monthly tourist check-in totals, submission rates, and top visiting nationalities used to derive Top 10 Market Holiday features.',
         status: futureCheckinsSubmission !== null || nationalitiesApiLatencyMs !== null || top10MarketHolidayForSelectedMonth.length > 0 ? 'active' : 'inactive',
         latencyMs: panglaoLatencyMs ?? nationalitiesApiLatencyMs,
       },
@@ -1459,7 +1419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
                     <div className="flex items-center justify-between mb-3">
-                      <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Forecast Model</p>
+                      <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Forecast Model Accuracy</p>
                     </div>
 
                     {modelCatalog.length === 0 ? (
@@ -1471,18 +1431,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                           { id: 'prophet', name: 'Prophet' },
                           { id: 'lstm', name: 'LSTM' },
                         ].map(m => (
-                          <button
+                          <div
                             key={m.id}
-                            onClick={() => setSelectedModel(m.id)}
-                            className={`text-left rounded-lg border p-3 transition-all focus:outline-none ${
-                              selectedModel === m.id
-                                ? 'border-sky-500 ring-2 ring-sky-500 ' + (isDarkMode ? 'bg-sky-950' : 'bg-sky-50')
-                                : isDarkMode ? 'border-slate-600 bg-slate-900 hover:border-slate-500' : 'border-gray-200 bg-white hover:border-gray-300'
-                            }`}
+                            className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'}`}
                           >
                             <p className="font-semibold text-sm">{m.name}</p>
-                            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Accuracy: —</p>
-                          </button>
+                            <p className={`text-2xl font-bold mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>—</p>
+                          </div>
                         ))}
                       </div>
                     ) : (
@@ -1496,17 +1451,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                         return (
                           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                             {modelCatalog.map(m => {
-                              const isSelected = selectedModel === m.id;
                               const isHighest = m.id === highestAccuracyId;
                               return (
-                                <button
+                                <div
                                   key={m.id}
-                                  onClick={() => setSelectedModel(m.id)}
-                                  className={`text-left rounded-lg border p-3 transition-all focus:outline-none ${
-                                    isSelected
-                                      ? 'border-sky-500 ring-2 ring-sky-500 ' + (isDarkMode ? 'bg-sky-950' : 'bg-sky-50')
-                                      : isDarkMode ? 'border-slate-600 bg-slate-900 hover:border-slate-500' : 'border-gray-200 bg-white hover:border-gray-300'
-                                  }`}
+                                  className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'}`}
                                 >
                                   <div className="flex items-start justify-between gap-1">
                                     <p className="font-semibold text-sm leading-tight">{m.name}</p>
@@ -1516,17 +1465,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                       </span>
                                     )}
                                   </div>
-                                  <p className={`text-xs mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    Accuracy:{' '}
-                                    <span className={`font-bold ${
-                                      isHighest ? 'text-green-500' : 'text-sky-500'
-                                    }`}>
-                                      {m.performance?.test_accuracy != null
-                                        ? `${m.performance.test_accuracy.toFixed(1)}%`
-                                        : '—'}
-                                    </span>
+                                  <p className={`text-2xl font-bold mt-2 ${isHighest ? 'text-green-500' : 'text-sky-500'}`}>
+                                    {m.performance?.test_accuracy != null
+                                      ? `${m.performance.test_accuracy.toFixed(1)}%`
+                                      : '—'}
                                   </p>
-                                </button>
+                                </div>
                               );
                             })}
                           </div>
@@ -1535,12 +1479,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3 lg:items-start">
                     {/* Model Retraining */}
                     {(() => {
                       const sortedModels = [...trainedModels].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                       const lastRetrainedModel = sortedModels[0] ?? null;
-                      const currentModel = trainedModels.find(m => m.inUse) ?? lastRetrainedModel;
                       const lastRetrainDate = lastRetrainedModel ? new Date(lastRetrainedModel.createdAt) : null;
                       // Next scheduled:
                       // - If in pending-retry mode: tomorrow at 23:59
@@ -1560,7 +1503,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                       const formatDate = (d: Date) =>
                         d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                       return (
-                        <div className={`rounded-lg border p-4 flex flex-col gap-4 h-full ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
+                        <div className={`rounded-lg border p-4 flex flex-col gap-2 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
                           {/* Header */}
                           <div className="flex items-center gap-2">
                             <svg className="h-5 w-5 text-sky-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1576,13 +1519,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                           <div className={`flex items-center justify-between rounded-lg p-3 ${isDarkMode ? 'bg-slate-700' : 'bg-gray-50'}`}>
                             <div>
                               <p className="font-semibold text-sm">Automated Retraining</p>
-                              <p className={`text-xs mt-0.5 ${autoRetrainingEnabled ? (pendingRetrainSince ? 'text-amber-500' : 'text-green-500') : isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                {autoRetrainingEnabled
-                                  ? pendingRetrainSince
-                                    ? 'Pending retry — submission rate < 70%'
-                                    : 'Active — runs on the 10th at 11:59 PM'
-                                  : 'Disabled'}
-                              </p>
                             </div>
                             <button
                               onClick={() => setAutoRetrainingEnabled(prev => !prev)}
@@ -1656,11 +1592,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             </div>
                           </div>
 
+                          {/* Training Parameters — Month / Year / Inflation / Lockdown */}
+                          <div className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-700' : 'border-gray-200 bg-gray-50'}`}>
+                            <p className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Training Parameters</p>
+                            <div className="grid grid-cols-4 gap-2">
+                              <div>
+                                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Month</label>
+                                <select
+                                  value={simulateMonth}
+                                  onChange={(e) => setSimulateMonth(Number(e.target.value))}
+                                  className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                                >
+                                  {months.map((m, i) => (
+                                    <option key={i + 1} value={i + 1}>{m}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Year</label>
+                                <select
+                                  value={simulateYear}
+                                  onChange={(e) => setSimulateYear(Number(e.target.value))}
+                                  className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                                >
+                                  {years.map((y) => (
+                                    <option key={y} value={y}>{y}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Inflation Rate (%)</label>
+                                <input
+                                  type="number"
+                                  value={manualInflationRate}
+                                  onChange={(e) => setManualInflationRate(e.target.value)}
+                                  placeholder="e.g. 3.5"
+                                  step="0.01"
+                                  className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`}
+                                />
+                              </div>
+                              <div>
+                                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Lockdown Period</label>
+                                <select
+                                  value={manualIsLockdown}
+                                  onChange={(e) => setManualIsLockdown(e.target.value as 'yes' | 'no')}
+                                  className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                                >
+                                  <option value="no">No</option>
+                                  <option value="yes">Yes</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+
                           {/* Manual Retrain */}
                           <button
                             onClick={handleSimulateMonthlyRetraining}
                             disabled={isSimulating}
-                            className={`mt-auto w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border font-semibold text-sm transition-colors disabled:opacity-60 ${isDarkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-gray-300 hover:bg-gray-50'}`}
+                            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border font-semibold text-sm transition-colors disabled:opacity-60 ${isDarkMode ? 'border-slate-600 hover:bg-slate-700' : 'border-gray-300 hover:bg-gray-50'}`}
                           >
                             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                               <path d="M21 2v6h-6" />
@@ -1676,48 +1665,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
                     {/* Trained Models Registry */}
                     <div className={`rounded-lg border p-4 flex flex-col ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
-                      <div className="flex items-center justify-between mb-3 shrink-0">
+                      <div className="mb-3 shrink-0">
                         <h3 className="text-lg font-semibold">Trained Models Registry</h3>
-                        <button
-                          onClick={loadData}
-                          className="px-3 py-1 text-xs bg-slate-600 text-white rounded hover:bg-slate-700"
-                        >
-                          Refresh
-                        </button>
                       </div>
-                      <div className="overflow-x-auto overflow-y-auto max-h-80">
+                      <div className="overflow-x-auto overflow-y-auto max-h-96">
                         <table className="w-full text-sm">
                           <thead>
                             <tr className={isDarkMode ? 'border-b border-slate-700 text-gray-300' : 'border-b border-gray-200 text-gray-600'}>
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Model Name</th>
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Date Created</th>
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Accuracy</th>
-                              <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>In Use</th>
-                              <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Action</th>
-                              <th className={`sticky top-0 text-left py-2 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Generate Prediction</th>
+                              <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Status</th>
+                              <th className={`sticky top-0 text-left py-2 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Prediction</th>
                             </tr>
                           </thead>
                           <tbody>
                             {trainedModels.map((model) => (
                               <tr key={model.id} className={isDarkMode ? 'border-b border-slate-800' : 'border-b border-gray-100'}>
-                                <td className="py-2 pr-3 font-medium">{model.modelName}</td>
+                                <td className="py-2 pr-3 font-medium">{formatModelVersion(model.modelName)}</td>
                                 <td className="py-2 pr-3">{new Date(model.createdAt).toLocaleString()}</td>
                                 <td className="py-2 pr-3">{typeof model.accuracy === 'number' ? `${(model.accuracy * 100).toFixed(2)}%` : '—'}</td>
                                 <td className="py-2 pr-3">
                                   {model.inUse ? (
-                                    <span className="px-2 py-1 rounded bg-green-600 text-white text-xs">IN USE</span>
+                                    <span className="px-2 py-1 rounded bg-green-600 text-white text-xs font-semibold">Active</span>
                                   ) : (
-                                    <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>No</span>
+                                    <button
+                                      onClick={() => handleUseModel(model.id)}
+                                      className="px-3 py-1 bg-sky-600 text-white rounded hover:bg-sky-700 text-xs"
+                                    >
+                                      Use
+                                    </button>
                                   )}
-                                </td>
-                                <td className="py-2 pr-3">
-                                  <button
-                                    onClick={() => handleUseModel(model.id)}
-                                    disabled={model.inUse}
-                                    className="px-3 py-1 bg-sky-600 text-white rounded hover:bg-sky-700 disabled:opacity-60"
-                                  >
-                                    {model.inUse ? 'Active' : 'Use'}
-                                  </button>
                                 </td>
                                 <td className="py-2">
                                   <button
