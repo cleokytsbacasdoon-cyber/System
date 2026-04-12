@@ -1,0 +1,18 @@
+[
+    "Peak_Season",
+    "Philippine_Holidays",
+    "Top10Market_Holidays",
+    "Avg_HighTemp",
+    "Avg_LowTemp",
+    "Precipitation",
+    "Lag_1",
+    "Lag_2",
+    "Rolling_Mean_3m",
+    "Year",
+    "Month_Num",
+    "Growth_Rate",
+    "Sudden_Increase",
+    "Inflation_Rate",
+    "is_December",
+    "is_Lockdown"
+]

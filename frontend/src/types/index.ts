@@ -132,7 +132,7 @@ export interface TrainedModel {
   createdAt: string;
   accuracy?: number;
   inUse: boolean;
-  algorithm: 'XGBoost';
+  algorithm: string;
 }
 
 export interface MonthlyRetrainRequest {
@@ -144,3 +144,19 @@ export interface MonthlyRetrainRequest {
 // Type aliases for Dashboard compatibility
 export type ModelMetrics = ForecastMetrics;
 export type DriftAlert = DemandAlert;
+
+export interface ModelCatalogEntry {
+  id: 'xgboost' | 'random_forest' | 'prophet' | 'lstm';
+  name: string;
+  algorithm: string;
+  featureCount: number;
+  features: string[];
+  hyperparameters: Record<string, unknown>;
+  performance: {
+    test_mae?: number;
+    test_rmse?: number;
+    test_accuracy?: number;
+    test_r2?: number;
+  } | null;
+  active: boolean;
+}

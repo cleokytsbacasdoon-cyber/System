@@ -13,6 +13,7 @@
     "ml:train": "python src/scripts/ml/train_tourism.py"
   },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.2",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",

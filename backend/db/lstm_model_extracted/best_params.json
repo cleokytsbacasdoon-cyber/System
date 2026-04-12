@@ -1,0 +1,9 @@
+{
+    "units1": 64,
+    "units2": 8,
+    "dropout": 0.2015995158924022,
+    "learning_rate": 0.00048632213647915645,
+    "batch_size": 20,
+    "bidirectional": true,
+    "epochs": 30
+}

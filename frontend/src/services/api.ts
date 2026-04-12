@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel, MonthlyRetrainRequest } from '../types';
+import { ForecastMetrics, DemandAlert, RetrainingJob, APIEndpoint, ModelVersion, DataQuality, DemandForecast, FeatureImportance, ForecastInsights, PhilippineHoliday, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel, MonthlyRetrainRequest, ModelCatalogEntry } from '../types';
 import { mockApi } from './mockApi';
 
 // Backend-first by default. Set VITE_USE_MOCK_API=true to force local mock mode.
@@ -71,6 +71,19 @@ export const simulateMonthlyRetraining = async (payload: MonthlyRetrainRequest):
   return response.data;
 };
 
+export interface CompareAllRetrainResult {
+  message: string;
+  winner: string;
+  winnerAccuracy: number;
+  results: Record<string, { accuracy: number; mape?: number; error?: string; versionId?: string; modelVersion?: string }>;
+  training: { cutoffYear: number; cutoffMonth: number; rowCount: number };
+}
+
+export const retrainAndCompareAll = async (payload: MonthlyRetrainRequest): Promise<CompareAllRetrainResult> => {
+  const response = await apiClient.post('/ml/retrain/compare-all', payload);
+  return response.data;
+};
+
 export const getTrainedModels = async (): Promise<TrainedModel[]> => {
   const response = await apiClient.get('/ml/trained-models');
   return response.data;
@@ -121,9 +134,16 @@ export const getDataQuality = async (): Promise<DataQuality> => {
 };
 
 // Demand Prediction APIs
-export const getDemandForecasts = async (monthsAhead = 12): Promise<DemandForecast[]> => {
+export const getDemandForecasts = async (monthsAhead = 12, model?: string): Promise<DemandForecast[]> => {
   if (USE_MOCK_API) return mockApi.getDemandForecasts();
-  const response = await apiClient.get('/forecasts', { params: { monthsAhead } });
+  const params: Record<string, unknown> = { monthsAhead };
+  if (model) params.model = model;
+  const response = await apiClient.get('/forecasts', { params });
+  return response.data;
+};
+
+export const getModelCatalog = async (): Promise<ModelCatalogEntry[]> => {
+  const response = await apiClient.get('/ml/models/catalog');
   return response.data;
 };
 

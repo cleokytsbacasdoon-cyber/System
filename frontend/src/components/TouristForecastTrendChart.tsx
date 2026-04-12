@@ -108,12 +108,12 @@ export const TouristForecastTrendChart: React.FC<TouristForecastTrendChartProps>
     });
 
     const predictedData = combined.map((entry, index) => {
-      if (index < lastThreeActual.length - 1) {
+      if (index < lastThreeActual.length) {
+        // Show model prediction for historical months when available
+        if (entry.predictedTotal > 0) return Math.round(entry.predictedTotal);
+        // Pivot point: fall back to actual so the line connects smoothly
+        if (index === lastThreeActual.length - 1) return Math.round(entry.actualTotal);
         return null;
-      }
-
-      if (index === lastThreeActual.length - 1) {
-        return Math.round(entry.actualTotal);
       }
 
       return Math.round(entry.predictedTotal);

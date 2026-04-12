@@ -12,6 +12,11 @@ const MODEL_FEATURES = [
   'avg_hightemp',
   'avg_lowtemp',
   'precipitation',
+  'lag_1',
+  'lag_2',
+  'rolling_mean_3m',
+  'growth_rate',
+  'sudden_increase',
   'inflation_rate',
   'is_december',
   'is_lockdown',
@@ -25,6 +30,25 @@ const COLAB_PREDICT_URL = process.env.ML_COLAB_PREDICT_URL || '';
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python';
 const PYTHON_PREDICT_SCRIPT = path.resolve(__dirname, '../scripts/ml/predict_tourism.py');
 const PYTHON_TRAIN_SCRIPT = path.resolve(__dirname, '../scripts/ml/train_tourism.py');
+
+// Model routing — set ML_MODEL env var to switch: xgboost | lstm | random_forest | prophet
+const ML_MODEL = (process.env.ML_MODEL || 'xgboost').toLowerCase();
+const DB_DIR = path.resolve(__dirname, '../../db');
+const DATASET_PATH = process.env.DATASET_PATH || path.join(DB_DIR, '2016 - 2025 datasets.csv');
+
+// LSTM paths
+const LSTM_SCALER_PATH = process.env.LSTM_SCALER_PATH || path.join(DB_DIR, 'lstm_model_extracted', 'scaler.pkl');
+const LSTM_MODEL_PATH = process.env.LSTM_MODEL_PATH || path.join(DB_DIR, 'lstm_model_extracted', 'lstm_best_model.keras');
+const LSTM_DATASET_PATH = DATASET_PATH;
+const PYTHON_LSTM_PREDICT_SCRIPT = path.resolve(__dirname, '../scripts/ml/predict_lstm.py');
+
+// Zip-based model paths
+const XGBOOST_ZIP_PATH = path.join(DB_DIR, 'xgboost_model.zip');
+const RF_ZIP_PATH = path.join(DB_DIR, 'random_forest_optimized.zip');
+const PROPHET_ZIP_PATH = path.join(DB_DIR, 'prophet_model.zip');
+const PYTHON_XGBOOST_ZIP_SCRIPT = path.resolve(__dirname, '../scripts/ml/predict_xgboost_zip.py');
+const PYTHON_RF_SCRIPT = path.resolve(__dirname, '../scripts/ml/predict_random_forest.py');
+const PYTHON_PROPHET_SCRIPT = path.resolve(__dirname, '../scripts/ml/predict_prophet.py');
 
 function fileExists(filePath) {
   try {
@@ -166,12 +190,25 @@ function toFeatureRow(record) {
   };
 }
 
-function buildFutureRows(monthlyRows, monthsAhead = 12) {
+// lastArrivals: array of last 3 known actual arrival values [oldest, ..., newest],
+// used to populate lag features in future rows (matches notebook V3 approach).
+function buildFutureRows(monthlyRows, monthsAhead = 12, lastArrivals = []) {
   if (!monthlyRows.length) return [];
 
   const sorted = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
   const last = sorted[sorted.length - 1];
   const futureRows = [];
+
+  // Notebook approach: use the same last-known lag values for all future months
+  const lagArr = lastArrivals.length >= 3 ? lastArrivals : [
+    sorted.length >= 3 ? Number(sorted[sorted.length - 3].arrivals || 0) : 0,
+    sorted.length >= 2 ? Number(sorted[sorted.length - 2].arrivals || 0) : 0,
+    sorted.length >= 1 ? Number(sorted[sorted.length - 1].arrivals || 0) : 0,
+  ];
+  const lag1 = lagArr[2];
+  const lag2 = lagArr[1];
+  const rollingMean3m = lagArr.reduce((s, v) => s + v, 0) / 3;
+  const growthRate = lag2 > 0 ? Number((((lag1 - lag2) / lag2) * 100).toFixed(4)) : 0;
 
   for (let i = 1; i <= monthsAhead; i += 1) {
     const absoluteMonth = Number(last.month) + i;
@@ -197,6 +234,12 @@ function buildFutureRows(monthlyRows, monthsAhead = 12) {
       inflation_rate: Number((avgInflation || 0).toFixed(2)),
       is_december: month === 12 ? 1 : 0,
       is_lockdown: 0,
+      // Lag features — same last-known values for all future months (notebook V3 conservative approach)
+      lag_1: lag1,
+      lag_2: lag2,
+      rolling_mean_3m: Number(rollingMean3m.toFixed(2)),
+      growth_rate: growthRate,
+      sudden_increase: 0,
     });
   }
 
@@ -226,44 +269,40 @@ async function retrainLocalModel(options = {}) {
   return runPythonScript(PYTHON_TRAIN_SCRIPT, payload);
 }
 
-async function buildForecastSeries(monthlyRows, monthsAhead = 12) {
-  const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
-  const historicalFeatures = historicalRows.map(toFeatureRow);
-  const historicalPredictions = await predictRows(historicalFeatures);
+/**
+ * Shared output mapper for Python predict scripts that return
+ * { historical_predictions, future_predictions } JSON.
+ */
+function mapPredictionOutput(output, historicalRows) {
+  const historicalForecasts = (output.historical_predictions || [])
+    .filter((p) => p.predicted !== null && p.predicted !== undefined)
+    .map((p) => {
+      const dbRow = historicalRows.find(
+        (r) => Number(r.year) === p.year && Number(r.month) === p.month_num,
+      );
+      const actual = dbRow ? Number(dbRow.arrivals) : (p.actual || 0);
+      const predicted = Math.max(0, Math.round(Number(p.predicted || 0)));
+      const monthPad = String(p.month_num).padStart(2, '0');
+      return {
+        id: `ml-h-${p.year}-${monthPad}`,
+        actualOccupancy: actual,
+        predictedOccupancy: predicted,
+        error: Math.round(Math.abs(predicted - actual)),
+        date: `${p.year}-${monthPad}-01`,
+        location: 'Panglao',
+        accommodationType: 'Tourist Arrivals',
+      };
+    });
 
-  const historicalForecasts = historicalRows.map((row, index) => {
-    const actual = Number(row.arrivals);
-    const predicted = Math.max(0, Number(historicalPredictions[index] || 0));
-    const date = `${row.year}-${String(row.month).padStart(2, '0')}-01`;
-
+  const futureForecasts = (output.future_predictions || []).map((p) => {
+    const predicted = Math.max(0, Math.round(Number(p.predicted || 0)));
+    const monthPad = String(p.month).padStart(2, '0');
     return {
-      id: `ml-h-${row.year}-${String(row.month).padStart(2, '0')}`,
-      actualOccupancy: actual,
-      predictedOccupancy: Math.round(predicted),
-      error: Math.round(Math.abs(predicted - actual)),
-      date,
-      location: 'Panglao',
-      accommodationType: 'Tourist Arrivals',
-    };
-  });
-
-  const futureFeatureRows = buildFutureRows(historicalRows, monthsAhead);
-  if (!futureFeatureRows.length) {
-    return historicalForecasts;
-  }
-
-  const futurePredictions = await predictRows(futureFeatureRows);
-
-  const futureForecasts = futureFeatureRows.map((row, index) => {
-    const predicted = Math.max(0, Number(futurePredictions[index] || 0));
-    const date = `${row.year}-${String(row.month).padStart(2, '0')}-01`;
-
-    return {
-      id: `ml-f-${row.year}-${String(row.month).padStart(2, '0')}`,
-      actualOccupancy: Math.round(predicted),
-      predictedOccupancy: Math.round(predicted),
+      id: `ml-f-${p.year}-${monthPad}`,
+      actualOccupancy: predicted,
+      predictedOccupancy: predicted,
       error: 0,
-      date,
+      date: `${p.year}-${monthPad}-01`,
       location: 'Panglao',
       accommodationType: 'Tourist Arrivals (Forecast)',
     };
@@ -272,12 +311,182 @@ async function buildForecastSeries(monthlyRows, monthsAhead = 12) {
   return [...historicalForecasts, ...futureForecasts];
 }
 
+async function buildLSTMForecastSeries(monthlyRows, monthsAhead = 12) {
+  const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+
+  const n = historicalRows.length;
+  const lastArrivals = [
+    n >= 3 ? Number(historicalRows[n - 3].arrivals || 0) : 0,
+    n >= 2 ? Number(historicalRows[n - 2].arrivals || 0) : 0,
+    n >= 1 ? Number(historicalRows[n - 1].arrivals || 0) : 0,
+  ];
+
+  // Build future month features using the same helper (climate/holidays by historical average)
+  const futureFeatureRows = buildFutureRows(historicalRows, monthsAhead, lastArrivals);
+
+  // Map future rows to the LSTM script's expected input format
+  const futureMonths = futureFeatureRows.map((row) => ({
+    year: row.year,
+    month: row.month,
+    top10market_holidays: row.top10market_holidays,
+    avg_hightemp: row.avg_hightemp,
+    avg_lowtemp: row.avg_lowtemp,
+    precipitation: row.precipitation,
+    inflation_rate: row.inflation_rate,
+    is_december: row.is_december,
+    is_lockdown: row.is_lockdown,
+  }));
+
+  const output = await runPythonScript(PYTHON_LSTM_PREDICT_SCRIPT, {
+    datasetPath: LSTM_DATASET_PATH,
+    scalerPath: LSTM_SCALER_PATH,
+    modelPath: LSTM_MODEL_PATH,
+    futureMonths,
+  });
+
+  if (!output.future_predictions || !output.historical_predictions) {
+    throw new Error('Invalid LSTM prediction output.');
+  }
+
+  // Match historical predictions against DB rows to get actual values
+  const historicalForecasts = output.historical_predictions
+    .filter((p) => p.predicted !== null)
+    .map((p) => {
+      const dbRow = historicalRows.find(
+        (r) => Number(r.year) === p.year && (
+          Number(r.month) === p.month_num ||
+          monthNameToNumber(r.month) === p.month_num
+        ),
+      );
+      const actual = dbRow ? Number(dbRow.arrivals) : 0;
+      const predicted = Math.max(0, Number(p.predicted || 0));
+      const monthPad = String(p.month_num).padStart(2, '0');
+      return {
+        id: `ml-h-${p.year}-${monthPad}`,
+        actualOccupancy: actual,
+        predictedOccupancy: Math.round(predicted),
+        error: Math.round(Math.abs(predicted - actual)),
+        date: `${p.year}-${monthPad}-01`,
+        location: 'Panglao',
+        accommodationType: 'Tourist Arrivals',
+      };
+    });
+
+  const futureForecasts = output.future_predictions.map((p) => {
+    const predicted = Math.max(0, Number(p.predicted || 0));
+    const monthPad = String(p.month).padStart(2, '0');
+    return {
+      id: `ml-f-${p.year}-${monthPad}`,
+      actualOccupancy: Math.round(predicted),
+      predictedOccupancy: Math.round(predicted),
+      error: 0,
+      date: `${p.year}-${monthPad}-01`,
+      location: 'Panglao',
+      accommodationType: 'Tourist Arrivals (Forecast)',
+    };
+  });
+
+  return [...historicalForecasts, ...futureForecasts];
+}
+
+async function buildXGBoostZipForecastSeries(monthlyRows, monthsAhead = 12) {
+  const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  const futureMonths = buildFutureRows(historicalRows, monthsAhead).map((r) => ({
+    year: r.year,
+    month: r.month,
+    peak_season: r.peak_season,
+    philippine_holidays: r.philippine_holidays,
+    top10market_holidays: r.top10market_holidays,
+    avg_hightemp: r.avg_hightemp,
+    avg_lowtemp: r.avg_lowtemp,
+    precipitation: r.precipitation,
+    inflation_rate: r.inflation_rate,
+    is_december: r.is_december,
+    is_lockdown: r.is_lockdown,
+  }));
+
+  const output = await runPythonScript(PYTHON_XGBOOST_ZIP_SCRIPT, {
+    datasetPath: DATASET_PATH,
+    zipPath: XGBOOST_ZIP_PATH,
+    futureMonths,
+  });
+
+  if (!output.historical_predictions || !output.future_predictions) {
+    throw new Error('Invalid XGBoost zip prediction output.');
+  }
+
+  return mapPredictionOutput(output, historicalRows);
+}
+
+async function buildRFForecastSeries(monthlyRows, monthsAhead = 12) {
+  const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  const futureMonths = buildFutureRows(historicalRows, monthsAhead).map((r) => ({
+    year: r.year,
+    month: r.month,
+    peak_season: r.peak_season,
+    philippine_holidays: r.philippine_holidays,
+    top10market_holidays: r.top10market_holidays,
+    avg_hightemp: r.avg_hightemp,
+    avg_lowtemp: r.avg_lowtemp,
+    precipitation: r.precipitation,
+    inflation_rate: r.inflation_rate,
+    is_december: r.is_december,
+    is_lockdown: r.is_lockdown,
+  }));
+
+  const output = await runPythonScript(PYTHON_RF_SCRIPT, {
+    datasetPath: DATASET_PATH,
+    zipPath: RF_ZIP_PATH,
+    futureMonths,
+  });
+
+  if (!output.historical_predictions || !output.future_predictions) {
+    throw new Error('Invalid Random Forest prediction output.');
+  }
+
+  return mapPredictionOutput(output, historicalRows);
+}
+
+async function buildProphetForecastSeries(monthlyRows, monthsAhead = 12) {
+  const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  // Prophet only needs year + month for future dates
+  const futureMonths = buildFutureRows(historicalRows, monthsAhead).map((r) => ({
+    year: r.year,
+    month: r.month,
+  }));
+
+  const output = await runPythonScript(PYTHON_PROPHET_SCRIPT, {
+    datasetPath: DATASET_PATH,
+    zipPath: PROPHET_ZIP_PATH,
+    futureMonths,
+  });
+
+  if (!output.historical_predictions || !output.future_predictions) {
+    throw new Error('Invalid Prophet prediction output.');
+  }
+
+  return mapPredictionOutput(output, historicalRows);
+}
+
+async function buildForecastSeries(monthlyRows, monthsAhead = 12) {
+  if (ML_MODEL === 'lstm') return buildLSTMForecastSeries(monthlyRows, monthsAhead);
+  if (ML_MODEL === 'random_forest' || ML_MODEL === 'rf') return buildRFForecastSeries(monthlyRows, monthsAhead);
+  if (ML_MODEL === 'prophet') return buildProphetForecastSeries(monthlyRows, monthsAhead);
+  // Default: XGBoost from db zip
+  return buildXGBoostZipForecastSeries(monthlyRows, monthsAhead);
+}
+
 module.exports = {
   MODEL_FEATURES,
   MODEL_FILE,
   MODEL_METADATA_FILE,
+  ML_MODEL,
   monthNameToNumber,
   getModelStatus,
   retrainLocalModel,
   buildForecastSeries,
+  buildLSTMForecastSeries,
+  buildXGBoostZipForecastSeries,
+  buildRFForecastSeries,
+  buildProphetForecastSeries,
 };
