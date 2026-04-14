@@ -1,12 +1,12 @@
 {
-  "modelVersion": "xgboost_base_january_2026",
+  "modelVersion": "xgboost_base_february_2026",
   "baseModelName": "xgboost_base",
   "algorithm": "xgboost",
   "cutoffYear": 2026,
-  "cutoffMonth": 1,
-  "trainedAtUtc": "2026-04-14T07:50:18.962532Z",
+  "cutoffMonth": 2,
+  "trainedAtUtc": "2026-04-14T07:52:37.465485Z",
   "datasetPath": "/app/db/2016 - 2025 datasets.csv",
-  "modelPath": "/app/models/xgboost_base_january_2026.json",
+  "modelPath": "/app/models/xgboost_base_february_2026.json",
   "featureOrder": [
     "year",
     "month",
@@ -36,16 +36,16 @@
     "reg_lambda": 0.7549611362574712
   },
   "metrics": {
-    "mae_train": 768.9653580515009,
-    "rmse_train": 947.3402370616299,
-    "mape_train": 19.399870342869733,
-    "r2_train": 0.9989783829260095,
-    "mae_test": 2678.1650390625,
-    "rmse_test": 3638.574421214185,
-    "mape_test": 3.4342780931407613,
-    "r2_test": 0.8333745343119819,
-    "rowCount": 119,
-    "trainCount": 95,
+    "mae_train": 749.4226497014364,
+    "rmse_train": 944.6754762544809,
+    "mape_train": 19.596910093651697,
+    "r2_train": 0.9989781367927251,
+    "mae_test": 2334.98095703125,
+    "rmse_test": 3122.571987030564,
+    "mape_test": 2.991959479708048,
+    "r2_test": 0.8741349953415924,
+    "rowCount": 120,
+    "trainCount": 96,
     "testCount": 24
   }
 }

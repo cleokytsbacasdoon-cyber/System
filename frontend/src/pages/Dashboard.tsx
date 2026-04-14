@@ -155,7 +155,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
   const [monthlyTourismData, setMonthlyTourismData] = useState<MonthlyTourismDatasetRecord[]>([]);
   const [top10MarketHolidayData, setTop10MarketHolidayData] = useState<Top10MarketHolidayRecord[]>([]);
-  const [futureCheckinsSubmission, setFutureCheckinsSubmission] = useState<CheckinsSubmissionData | null>(null);
+  const [futureCheckinsSubmission, setFutureCheckinsSubmission] = useState<CheckinsSubmissionData | null>(() => {
+    try { return JSON.parse(localStorage.getItem('ml-future-checkins') ?? 'null') as CheckinsSubmissionData | null; }
+    catch { return null; }
+  });
   const [trainedModels, setTrainedModels] = useState<TrainedModel[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('xgboost');
@@ -170,7 +173,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     try { return JSON.parse(localStorage.getItem('ml-notifications') ?? '[]') as NotificationItem[]; }
     catch { return []; }
   });
-  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ml-read-notification-ids') ?? '[]') as string[]; }
+    catch { return []; }
+  });
   const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
   const [simulateMonth, setSimulateMonth] = useState(() => {
     const now = new Date();
@@ -182,6 +188,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
   });
   const [isSimulating, setIsSimulating] = useState(false);
+  const [lastCompareResult, setLastCompareResult] = useState<CompareAllRetrainResult | null>(() => {
+    try { return JSON.parse(localStorage.getItem('ml-last-compare-result') ?? 'null') as CompareAllRetrainResult | null; }
+    catch { return null; }
+  });
   const [manualInflationRate, setManualInflationRate] = useState('');
   const [manualIsLockdown, setManualIsLockdown] = useState<'yes' | 'no'>('no');
   const [autoRetrainingEnabled, setAutoRetrainingEnabled] = useState<boolean>(() => {
@@ -298,6 +308,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         year: simulateYear,
       });
       setSelectedModel(result.winner);
+      setLastCompareResult(result);
       const winnerLabel = getModelLabel(result.winner);
       addToast(
         `All-model retraining done. Winner: ${winnerLabel} (${(result.winnerAccuracy * 100).toFixed(1)}% accuracy)`,
@@ -359,6 +370,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   useEffect(() => {
     localStorage.setItem('ml-notifications', JSON.stringify(notifications));
   }, [notifications]);
+
+  useEffect(() => {
+    localStorage.setItem('ml-read-notification-ids', JSON.stringify(readNotificationIds));
+  }, [readNotificationIds]);
+
+  useEffect(() => {
+    if (lastCompareResult) localStorage.setItem('ml-last-compare-result', JSON.stringify(lastCompareResult));
+  }, [lastCompareResult]);
 
   useEffect(() => {
     localStorage.setItem('ml-auto-retrain-enabled', JSON.stringify(autoRetrainingEnabled));
@@ -652,6 +671,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
         const data = await getCheckinsSubmission(dashboardYear, monthNumber);
         setPanglaoLatencyMs(Math.round(performance.now() - startedAt));
         setFutureCheckinsSubmission(data);
+        try { localStorage.setItem('ml-future-checkins', JSON.stringify(data)); } catch { /* ignore */ }
 
         if (!Number.isFinite(Number(data.totalCheckIns)) || Number(data.totalCheckIns) <= 0) {
           return;
@@ -1005,7 +1025,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   useEffect(() => {
     if (!isNotificationOpen || notificationItems.length === 0) return;
-    setReadNotificationIds((prev) => Array.from(new Set([...prev, ...notificationItems.map((item) => item.id)])));
+    setReadNotificationIds((prev) => {
+      const next = Array.from(new Set([...prev, ...notificationItems.map((item) => item.id)]));
+      localStorage.setItem('ml-read-notification-ids', JSON.stringify(next));
+      return next;
+    });
   }, [isNotificationOpen, notificationItems]);
 
   useEffect(() => {
@@ -1420,9 +1444,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
                     <div className="flex items-center justify-between mb-3">
                       <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Forecast Model Accuracy</p>
+                      {lastCompareResult && (() => {
+                        const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                        return (
+                          <p className={`text-xs font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Retrained on data up to {MONTHS[lastCompareResult.training.cutoffMonth - 1]} {lastCompareResult.training.cutoffYear}
+                          </p>
+                        );
+                      })()}
                     </div>
 
-                    {modelCatalog.length === 0 ? (
+                    {lastCompareResult ? (
+                      /* Post-retrain comparison: show all 4 model results */
+                      (() => {
+                        return (
+                          <>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                              {(['xgboost', 'lstm', 'random_forest', 'prophet'] as const).map((id) => {
+                                const r = lastCompareResult.results[id];
+                                const isWinner = id === lastCompareResult.winner;
+                                const acc = r?.accuracy != null ? r.accuracy : null;
+                                const hasError = !!r?.error;
+                                const label = getModelLabel(id);
+                                return (
+                                  <div
+                                    key={id}
+                                    className={`rounded-lg border p-3 ${
+                                      isWinner
+                                        ? isDarkMode ? 'border-green-600 bg-slate-900' : 'border-green-400 bg-white'
+                                        : isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-1">
+                                      <p className="font-semibold text-sm leading-tight">{label}</p>
+                                      {isWinner && (
+                                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-semibold ${isDarkMode ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
+                                          Active
+                                        </span>
+                                      )}
+                                    </div>
+                                    {hasError ? (
+                                      <p className={`text-sm font-semibold mt-2 ${isDarkMode ? 'text-red-400' : 'text-red-500'}`}>Error</p>
+                                    ) : (
+                                      <p className={`text-2xl font-bold mt-2 ${isWinner ? 'text-green-500' : 'text-sky-500'}`}>
+                                        {acc != null ? `${(acc * 100).toFixed(1)}%` : '—'}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        );
+                      })()
+                    ) : modelCatalog.length === 0 ? (
                       /* Fallback static cards when catalog not yet loaded */
                       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                         {[
@@ -1479,7 +1554,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3 lg:items-start">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3">
                     {/* Model Retraining */}
                     {(() => {
                       const sortedModels = [...trainedModels].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1583,7 +1658,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                               <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
                             </svg>
                             <div>
-                              <p className={`text-xs font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>Current Model</p>
+                              <p className={`text-xs font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>Active Model</p>
                               <p className="text-sm font-semibold break-all">
                                 {selectedModel
                                   ? getModelLabel(selectedModel)

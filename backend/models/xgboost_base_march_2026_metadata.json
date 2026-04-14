@@ -4,7 +4,7 @@
   "algorithm": "xgboost",
   "cutoffYear": 2026,
   "cutoffMonth": 3,
-  "trainedAtUtc": "2026-04-10T15:52:58.696511Z",
+  "trainedAtUtc": "2026-04-14T07:14:27.667758Z",
   "datasetPath": "/app/db/2016 - 2025 datasets.csv",
   "modelPath": "/app/models/xgboost_base_march_2026.json",
   "featureOrder": [
@@ -40,10 +40,10 @@
     "rmse_train": 941.3750410703643,
     "mape_train": 18.47775701145133,
     "r2_train": 0.998985264535347,
-    "mae_test": 2342.26296875,
-    "rmse_test": 3042.209895523687,
-    "mape_test": 3.1113733001830934,
-    "r2_test": 0.8976633124899407,
+    "mae_test": 2385.175,
+    "rmse_test": 3077.5719383860323,
+    "mape_test": 3.185570452324535,
+    "r2_test": 0.8943918904533079,
     "rowCount": 121,
     "trainCount": 96,
     "testCount": 25

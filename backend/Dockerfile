@@ -4,7 +4,7 @@ WORKDIR /app
 
 # --- Node.js dependencies (cached layer) ---
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # --- Python setup (cached until requirements.txt changes) ---
 RUN apt-get update \

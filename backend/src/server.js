@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const axios = require('axios');
+const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,6 +12,9 @@ const { query } = require('./db');
 const {
   getModelStatus,
   retrainLocalModel,
+  retrainLSTMModel,
+  retrainRFModel,
+  retrainProphetModel,
   buildForecastSeries,
   buildXGBoostZipForecastSeries,
   buildRFForecastSeries,
@@ -162,6 +166,101 @@ const ensureHolidayCacheTable = async () => {
     )
   `);
 };
+
+const ensureSavedPredictionsTable = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS saved_predictions (
+      id TEXT PRIMARY KEY,
+      predicted_year INTEGER NOT NULL,
+      predicted_month INTEGER NOT NULL,
+      predicted_arrivals INTEGER NOT NULL,
+      trained_through_year INTEGER NOT NULL,
+      trained_through_month INTEGER NOT NULL,
+      model_name TEXT NOT NULL,
+      prediction_type TEXT NOT NULL CHECK (prediction_type IN ('historical', 'future')),
+      saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (predicted_year, predicted_month)
+    )
+  `);
+};
+
+/**
+ * Saves predictions from the winning model after a retrain.
+ *
+ * Historical (Jan 2024 → cutoff): UPSERT, but never overwrite a row whose
+ *   prediction_type is already 'future'. Those rows represent the original
+ *   out-of-sample forecast and must be preserved for accuracy comparison.
+ *
+ * Future (next month after cutoff): INSERT only. Once set, the first prediction
+ *   made before seeing real data is permanently preserved.
+ */
+async function savePredictionsFromRetrain(series, cutoffYear, cutoffMonth, modelName) {
+  if (!series || series.length === 0) return;
+
+  // Historical window: Jan 2024 inclusive through the cutoff month.
+  const historicalEntries = series.filter((e) => {
+    const id = String(e.id || '');
+    if (!id.startsWith('ml-h-') && !id.startsWith('sp-h-')) return false;
+    const d = new Date(e.date);
+    const yr = d.getFullYear();
+    const mo = d.getMonth() + 1;
+    if (yr < 2024) return false;
+    if (yr > cutoffYear || (yr === cutoffYear && mo > cutoffMonth)) return false;
+    return true;
+  });
+
+  // The next month after cutoff (the locked-in future forecast).
+  const nextDate = new Date(cutoffYear, cutoffMonth, 1); // JS month is 0-based; cutoffMonth+1 here
+  const nextYear = nextDate.getFullYear();
+  const nextMonth = nextDate.getMonth() + 1;
+  const futureEntry = series.find((e) => {
+    const id = String(e.id || '');
+    const isF = id.startsWith('ml-f-') || id.startsWith('sp-f-')
+      || String(e.accommodationType || '').toLowerCase().includes('forecast');
+    if (!isF) return false;
+    const d = new Date(e.date);
+    return d.getFullYear() === nextYear && d.getMonth() + 1 === nextMonth;
+  });
+
+  // Upsert historical predictions; skip if the month is already locked as 'future'.
+  for (const entry of historicalEntries) {
+    const d = new Date(entry.date);
+    const yr = d.getFullYear();
+    const mo = d.getMonth() + 1;
+    const monthPad = String(mo).padStart(2, '0');
+    const id = `sp-h-${yr}-${monthPad}`;
+    await query(
+      `INSERT INTO saved_predictions
+         (id, predicted_year, predicted_month, predicted_arrivals,
+          trained_through_year, trained_through_month, model_name, prediction_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'historical')
+       ON CONFLICT (predicted_year, predicted_month) DO UPDATE SET
+         id                    = EXCLUDED.id,
+         predicted_arrivals    = EXCLUDED.predicted_arrivals,
+         trained_through_year  = EXCLUDED.trained_through_year,
+         trained_through_month = EXCLUDED.trained_through_month,
+         model_name            = EXCLUDED.model_name,
+         prediction_type       = 'historical',
+         saved_at              = NOW()
+       WHERE saved_predictions.prediction_type != 'future'`,
+      [id, yr, mo, Math.round(entry.predictedOccupancy), cutoffYear, cutoffMonth, modelName]
+    );
+  }
+
+  // Insert future prediction — preserve the very first forecast for this month.
+  if (futureEntry) {
+    const monthPad = String(nextMonth).padStart(2, '0');
+    const id = `sp-f-${nextYear}-${monthPad}`;
+    await query(
+      `INSERT INTO saved_predictions
+         (id, predicted_year, predicted_month, predicted_arrivals,
+          trained_through_year, trained_through_month, model_name, prediction_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'future')
+       ON CONFLICT (predicted_year, predicted_month) DO NOTHING`,
+      [id, nextYear, nextMonth, Math.round(futureEntry.predictedOccupancy), cutoffYear, cutoffMonth, modelName]
+    );
+  }
+}
 
 const getCachedPhilippineHolidayCount = async (year, month) => {
   const result = await query(
@@ -804,15 +903,17 @@ app.get('/api/ml/models/catalog', async (_req, res, next) => {
       const zipRf = path.join(dbDir, 'random_forest_optimized.zip');
       const AdmZip = require('adm-zip');
       const zRf = new AdmZip(zipRf);
-      const features = JSON.parse(zRf.readAsText('features_v3.json'));
-      const params = JSON.parse(zRf.readAsText('best_params_rf.json'));
+      let rfFeatures = ['Year', 'Month', 'Top10Market_Holidays', 'Avg_HighTemp', 'Avg_LowTemp', 'Precipitation', 'Inflation_Rate', 'is_Lockdown'];
+      let rfParams = {};
+      try { rfFeatures = JSON.parse(zRf.readAsText('features_v3.json')); } catch { /* use defaults */ }
+      try { rfParams = JSON.parse(zRf.readAsText('best_params_rf.json')); } catch { /* use defaults */ }
       catalog.push({
         id: 'random_forest',
         name: 'Random Forest',
         algorithm: 'Random Forest Regressor',
-        featureCount: features.length,
-        features,
-        hyperparameters: params,
+        featureCount: rfFeatures.length,
+        features: rfFeatures,
+        hyperparameters: rfParams,
         performance: null,
         active: ML_MODEL === 'random_forest' || ML_MODEL === 'rf',
       });
@@ -823,16 +924,18 @@ app.get('/api/ml/models/catalog', async (_req, res, next) => {
       const zipP = path.join(dbDir, 'prophet_model.zip');
       const AdmZip = require('adm-zip');
       const zP = new AdmZip(zipP);
-      const config = JSON.parse(zP.readAsText('model_config.json'));
-      const params = JSON.parse(zP.readAsText('best_params_prophet.json'));
+      let prophetParams = {};
+      let prophetPerf = null;
+      try { const config = JSON.parse(zP.readAsText('model_config.json')); prophetPerf = config.performance || null; } catch { /* use defaults */ }
+      try { prophetParams = JSON.parse(zP.readAsText('best_params_prophet.json')); } catch { /* use defaults */ }
       catalog.push({
         id: 'prophet',
         name: 'Prophet',
         algorithm: 'Facebook Prophet',
         featureCount: 2,
         features: ['ds (date)', 'y (arrivals)'],
-        hyperparameters: params,
-        performance: config.performance || null,
+        hyperparameters: prophetParams,
+        performance: prophetPerf,
         active: ML_MODEL === 'prophet',
       });
     } catch (e) { /* zip not available */ }
@@ -1095,15 +1198,197 @@ app.post('/api/ml/retrain/simulate-monthly', async (req, res, next) => {
 });
 
 /**
+ * Core compare-all logic — reusable by the HTTP route and the auto-retrain scheduler.
+ * Evaluates all 4 models, picks the winner, persists metrics to DB, and returns
+ * the winner's forecast series so predictions can be saved.
+ */
+async function compareAllModels(year, month, baseModelName) {
+  const trainingRows = await query(
+    `SELECT * FROM monthly_tourism_dataset
+     WHERE year < $1 OR (year = $1 AND month <= $2)
+     ORDER BY year, month`,
+    [year, month]
+  );
+
+  if (trainingRows.rowCount === 0) {
+    const err = new Error('No dataset rows found up to the requested month/year');
+    err.status = 400;
+    throw err;
+  }
+
+  const monthName = monthNumberToName(month);
+  const results = {};
+  const seriesMap = {};
+
+  // ── 1. XGBoost retrain (full retrain with train/test split) ──────────────
+  try {
+    const xgbModelVersion = `${baseModelName}_${monthName}_${year}`;
+    const xgbModelPath = resolveModelFileByVersion(xgbModelVersion);
+    const xgbMetadataPath = resolveMetadataFileByVersion(xgbModelVersion);
+    const jobId = `job-cmp-xgb-${Date.now()}`;
+
+    await query(
+      'INSERT INTO retraining_jobs (id, model_id, status, start_time) VALUES ($1, $2, $3, NOW())',
+      [jobId, xgbModelVersion, 'running']
+    );
+
+    const trainingPayloadRows = trainingRows.rows.map(toTrainingPayloadRow);
+    const xgbResult = await retrainLocalModel({
+      modelVersion: xgbModelVersion,
+      modelPath: xgbModelPath,
+      metadataPath: xgbMetadataPath,
+      rows: trainingPayloadRows,
+      baseModelName,
+      cutoffYear: year,
+      cutoffMonth: month,
+    });
+
+    const mapeTrain = Number(xgbResult?.metrics?.mape_train || 0);
+    const mapeTest = Number(xgbResult?.metrics?.mape_test || 0);
+    const maeTrain = Number(xgbResult?.metrics?.mae_train || 0);
+    const rmseTrain = Number(xgbResult?.metrics?.rmse_train || 0);
+    const r2Train = Number(xgbResult?.metrics?.r2_train || 0);
+    const accuracyValue = Math.max(0, Math.min(1, 1 - (mapeTest / 100)));
+
+    // Remove any existing row for this exact version to avoid duplicates on re-runs.
+    await query('DELETE FROM model_versions WHERE version = $1', [xgbModelVersion]);
+
+    const versionId = `mv-cmp-xgb-${Date.now()}`;
+    await query(
+      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
+       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived')`,
+      [versionId, xgbModelVersion, accuracyValue, accuracyValue, accuracyValue]
+    );
+    await query(
+      `INSERT INTO forecast_metrics (id, mape, rmse, mae, r2_score, timestamp)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [`metric-cmp-xgb-${Date.now()}`, mapeTest, rmseTrain, maeTrain, r2Train]
+    );
+    await query(
+      'UPDATE retraining_jobs SET status = $1, end_time = NOW(), accuracy = $2 WHERE id = $3',
+      ['completed', accuracyValue, jobId]
+    );
+
+    results.xgboost = { versionId, modelVersion: xgbModelVersion, accuracy: accuracyValue, mape: mapeTest };
+  } catch (err) {
+    results.xgboost = { error: err.message, accuracy: 0 };
+  }
+
+  // ── 2–4. LSTM / Random Forest / Prophet – retrain weights then compute MAPE ──
+  const trainingPayloadRowsOther = trainingRows.rows.map(toTrainingPayloadRow);
+
+  const evalModels = [
+    {
+      id: 'lstm',
+      label: 'LSTM',
+      retrainFn: () => retrainLSTMModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
+      buildFn: () => buildLSTMForecastSeries(trainingRows.rows, 1),
+    },
+    {
+      id: 'random_forest',
+      label: 'Random Forest',
+      retrainFn: () => retrainRFModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
+      buildFn: () => buildRFForecastSeries(trainingRows.rows, 1),
+    },
+    {
+      id: 'prophet',
+      label: 'Prophet',
+      retrainFn: () => retrainProphetModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
+      buildFn: () => buildProphetForecastSeries(trainingRows.rows, 1),
+    },
+  ];
+
+  for (const m of evalModels) {
+    // Retrain model weights and capture test-set metrics from the train script.
+    // Fall through to evaluate with existing model on failure.
+    let retrainMetrics = null;
+    try {
+      const retrainResult = await m.retrainFn();
+      retrainMetrics = retrainResult?.metrics || null;
+      console.log(`[compareAllModels] ${m.label} retrained successfully.`);
+    } catch (retrainErr) {
+      console.warn(`[compareAllModels] ${m.label} retrain failed (using existing model): ${retrainErr.message}`);
+    }
+
+    try {
+      const series = await m.buildFn();
+      seriesMap[m.id] = series;
+
+      // Prefer the train-script's test-set MAPE (fair comparison, same holdout as XGBoost).
+      // Fall back to full-history MAPE if retrain metrics are unavailable.
+      let mape, accuracy;
+      if (retrainMetrics && Number.isFinite(retrainMetrics.mape_test) && retrainMetrics.mape_test > 0) {
+        mape = Number(retrainMetrics.mape_test);
+        accuracy = Math.max(0, Math.min(1, 1 - (mape / 100)));
+      } else {
+        const historical = series.filter(
+          (e) => !String(e.id || '').startsWith('ml-f-') && e.actualOccupancy > 0 && e.predictedOccupancy > 0
+        );
+        if (historical.length === 0) {
+          results[m.id] = { accuracy: 0, mape: 100, error: 'No historical predictions returned' };
+          continue;
+        }
+        mape = historical.reduce((sum, e) => {
+          return sum + Math.abs((e.actualOccupancy - e.predictedOccupancy) / e.actualOccupancy);
+        }, 0) / historical.length * 100;
+        accuracy = Math.max(0, Math.min(1, 1 - (mape / 100)));
+      }
+      results[m.id] = { accuracy, mape };
+      console.log(`[compareAllModels] ${m.id} accuracy=${accuracy} mape=${mape} monthName=${monthName} year=${year}`);
+      if (accuracy > 0) {
+        const delResult = await query('DELETE FROM model_versions WHERE id = $1', [`mv-cmp-${m.id}-eval`]).catch(e => { console.error(`[compareAllModels] DELETE ${m.id} error:`, e.message); return null; });
+        console.log(`[compareAllModels] DELETE ${m.id} rowCount=${delResult?.rowCount}`);
+        const insResult = await query(
+          `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
+           VALUES ($1, $2, NOW(), $3, $3, $3, 'archived')`,
+          [`mv-cmp-${m.id}-eval`, `${m.id}_eval_${monthName}_${year}`, accuracy]
+        ).catch(e => { console.error(`[compareAllModels] INSERT ${m.id} error:`, e.message); return null; });
+        console.log(`[compareAllModels] INSERT ${m.id} rowCount=${insResult?.rowCount}`);
+      }
+    } catch (err) {
+      results[m.id] = { error: err.message, accuracy: 0 };
+    }
+  }
+
+  // ── Pick winner (highest accuracy) ──────────────────────────────────────
+  const modelIds = ['xgboost', 'lstm', 'random_forest', 'prophet'];
+  const winner = modelIds.reduce((best, id) => {
+    return (results[id]?.accuracy ?? 0) > (results[best]?.accuracy ?? 0) ? id : best;
+  }, modelIds[0]);
+
+  // Archive all XGBoost rows; activate winner if it is XGBoost.
+  await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'").catch(() => {});
+  if (winner === 'xgboost' && results.xgboost?.versionId) {
+    await query(
+      "UPDATE model_versions SET status = 'active' WHERE id = $1",
+      [results.xgboost.versionId]
+    ).catch(() => {});
+  }
+
+  // ── Build winner's series (needed for saving predictions) ────────────────
+  let winnerSeries = null;
+  try {
+    if (winner === 'xgboost') {
+      // Use the baseline zip model with 1-month horizon to get the next-month forecast.
+      winnerSeries = await buildXGBoostZipForecastSeries(trainingRows.rows, 1);
+    } else {
+      winnerSeries = seriesMap[winner] || null;
+    }
+  } catch (seriesErr) {
+    console.warn(`[compareAllModels] Could not build winner (${winner}) series:`, seriesErr.message);
+  }
+
+  return {
+    winner,
+    winnerAccuracy: results[winner]?.accuracy ?? 0,
+    results,
+    winnerSeries,
+    training: { cutoffYear: year, cutoffMonth: month, rowCount: trainingRows.rowCount },
+  };
+}
+
+/**
  * POST /api/ml/retrain/compare-all
- * Retrains all 4 models (XGBoost, LSTM, Random Forest, Prophet) up to the given
- * month/year, computes their test-set accuracy (1 - MAPE/100 from train_tourism),
- * picks the winner, persists the result, and returns a comparison report.
- *
- * For LSTM / RF / Prophet the current trained models are used as-is to run
- * historical predictions against the DB rows and MAPE is computed on the fly,
- * since those models do not have a separate retrain script.
- *
  * Body: { year: number, month: number, baseModelName?: string }
  */
 app.post('/api/ml/retrain/compare-all', async (req, res, next) => {
@@ -1119,135 +1404,23 @@ app.post('/api/ml/retrain/compare-all', async (req, res, next) => {
       return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
     }
 
-    const trainingRows = await query(
-      `SELECT * FROM monthly_tourism_dataset
-       WHERE year < $1 OR (year = $1 AND month <= $2)
-       ORDER BY year, month`,
-      [year, month]
-    );
+    const result = await compareAllModels(year, month, baseModelName);
 
-    if (trainingRows.rowCount === 0) {
-      return res.status(400).json({ error: 'No dataset rows found up to the requested month/year' });
-    }
-
-    const monthName = monthNumberToName(month);
-    const results = {};
-
-    // ── 1. XGBoost retrain (full retrain with train/test split) ──────────────
-    try {
-      const xgbModelVersion = `${baseModelName}_${monthName}_${year}`;
-      const xgbModelPath = resolveModelFileByVersion(xgbModelVersion);
-      const xgbMetadataPath = resolveMetadataFileByVersion(xgbModelVersion);
-      const jobId = `job-cmp-xgb-${Date.now()}`;
-
-      await query(
-        'INSERT INTO retraining_jobs (id, model_id, status, start_time) VALUES ($1, $2, $3, NOW())',
-        [jobId, xgbModelVersion, 'running']
+    if (result.winnerSeries) {
+      await savePredictionsFromRetrain(result.winnerSeries, year, month, result.winner).catch((e) =>
+        console.warn('[compare-all] Failed to save retrain predictions:', e.message)
       );
-
-      const trainingPayloadRows = trainingRows.rows.map(toTrainingPayloadRow);
-      const xgbResult = await retrainLocalModel({
-        modelVersion: xgbModelVersion,
-        modelPath: xgbModelPath,
-        metadataPath: xgbMetadataPath,
-        rows: trainingPayloadRows,
-        baseModelName,
-        cutoffYear: year,
-        cutoffMonth: month,
-      });
-
-      const mapeTrain = Number(xgbResult?.metrics?.mape_train || 0);
-      const mapeTest = Number(xgbResult?.metrics?.mape_test || 0);
-      const maeTrain = Number(xgbResult?.metrics?.mae_train || 0);
-      const rmseTrain = Number(xgbResult?.metrics?.rmse_train || 0);
-      const r2Train = Number(xgbResult?.metrics?.r2_train || 0);
-      const accuracyValue = Math.max(0, Math.min(1, 1 - (mapeTest / 100)));
-
-      // Remove any existing row for this exact version to avoid accumulating duplicates on re-runs
-      await query('DELETE FROM model_versions WHERE version = $1', [xgbModelVersion]);
-
-      const versionId = `mv-cmp-xgb-${Date.now()}`;
-      await query(
-        `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
-         VALUES ($1, $2, NOW(), $3, $4, $5, 'archived')`,
-        [versionId, xgbModelVersion, accuracyValue, accuracyValue, accuracyValue]
-      );
-      await query(
-        `INSERT INTO forecast_metrics (id, mape, rmse, mae, r2_score, timestamp)
-         VALUES ($1, $2, $3, $4, $5, NOW())`,
-        [`metric-cmp-xgb-${Date.now()}`, mapeTest, rmseTrain, maeTrain, r2Train]
-      );
-      await query(
-        'UPDATE retraining_jobs SET status = $1, end_time = NOW(), accuracy = $2 WHERE id = $3',
-        ['completed', accuracyValue, jobId]
-      );
-
-      results.xgboost = { versionId, modelVersion: xgbModelVersion, accuracy: accuracyValue, mape: mapeTest };
-    } catch (err) {
-      results.xgboost = { error: err.message, accuracy: 0 };
-    }
-
-    // ── 2–4. LSTM / Random Forest / Prophet – run predictions and compute MAPE ──
-    const evalModels = [
-      { id: 'lstm', label: 'LSTM', buildFn: () => buildLSTMForecastSeries(trainingRows.rows, 1) },
-      { id: 'random_forest', label: 'Random Forest', buildFn: () => buildRFForecastSeries(trainingRows.rows, 1) },
-      { id: 'prophet', label: 'Prophet', buildFn: () => buildProphetForecastSeries(trainingRows.rows, 1) },
-    ];
-
-    for (const m of evalModels) {
-      try {
-        const series = await m.buildFn();
-        // Only historical predictions have actual values to compare
-        const historical = series.filter(
-          (e) => !String(e.id || '').startsWith('ml-f-') && e.actualOccupancy > 0 && e.predictedOccupancy > 0
-        );
-        if (historical.length === 0) {
-          results[m.id] = { accuracy: 0, mape: 100, error: 'No historical predictions returned' };
-          continue;
-        }
-        const mape = historical.reduce((sum, e) => {
-          return sum + Math.abs((e.actualOccupancy - e.predictedOccupancy) / e.actualOccupancy);
-        }, 0) / historical.length * 100;
-        const accuracy = Math.max(0, Math.min(1, 1 - (mape / 100)));
-        results[m.id] = { accuracy, mape };
-        // Persist accuracy to model_versions only when meaningful (>0)
-        if (accuracy > 0) {
-          await query(
-            `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
-             VALUES ($1, $2, NOW(), $3, $3, $3, 'archived')
-             ON CONFLICT (id) DO UPDATE SET accuracy = EXCLUDED.accuracy, deploy_date = NOW()`,
-            [`mv-cmp-${m.id}-eval`, `${m.id}_eval_${monthName}_${year}`, accuracy]
-          ).catch(() => {});
-        }
-      } catch (err) {
-        results[m.id] = { error: err.message, accuracy: 0 };
-      }
-    }
-
-    // ── Pick winner (highest accuracy) ──────────────────────────────────────
-    const modelIds = ['xgboost', 'lstm', 'random_forest', 'prophet'];
-    const winner = modelIds.reduce((best, id) => {
-      return (results[id]?.accuracy ?? 0) > (results[best]?.accuracy ?? 0) ? id : best;
-    }, modelIds[0]);
-
-    // Archive ALL existing xgboost rows, then activate only the winner if it is XGBoost.
-    // This ensures exactly one active row at most in the trained-models registry.
-    await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'").catch(() => {});
-    if (winner === 'xgboost' && results.xgboost?.versionId) {
-      await query(
-        "UPDATE model_versions SET status = 'active' WHERE id = $1",
-        [results.xgboost.versionId]
-      ).catch(() => {});
     }
 
     res.status(201).json({
       message: 'All-model comparison retraining completed',
-      winner,
-      winnerAccuracy: results[winner]?.accuracy ?? 0,
-      results,
-      training: { cutoffYear: year, cutoffMonth: month, rowCount: trainingRows.rowCount },
+      winner: result.winner,
+      winnerAccuracy: result.winnerAccuracy,
+      results: result.results,
+      training: result.training,
     });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     next(error);
   }
 });
@@ -1257,9 +1430,81 @@ app.get('/api/forecasts', async (req, res, next) => {
     const preferLegacy = String(req.query.source || '').toLowerCase() === 'legacy';
     const monthsAheadRaw = Number(req.query.monthsAhead ?? 12);
     const monthsAhead = Number.isInteger(monthsAheadRaw) && monthsAheadRaw > 0 ? Math.min(monthsAheadRaw, 24) : 12;
-
     const modelParam = String(req.query.model || '').toLowerCase() || null;
 
+    // Default (no specific model): serve saved_predictions for historical comparison,
+    // then append live Python predictions for any future months not yet saved.
+    if (!preferLegacy && !modelParam) {
+      try {
+        const savedResult = await query(
+          'SELECT * FROM saved_predictions ORDER BY predicted_year, predicted_month'
+        );
+
+        if (savedResult.rowCount > 0) {
+          const monthlyResult = await query(
+            'SELECT * FROM monthly_tourism_dataset ORDER BY year, month'
+          );
+
+          // Lookup: "YYYY-MM" → actual arrivals from the DB dataset.
+          const actualLookup = new Map();
+          monthlyResult.rows.forEach((r) => {
+            actualLookup.set(`${r.year}-${String(r.month).padStart(2, '0')}`, Number(r.arrivals));
+          });
+
+          // Map saved predictions: pair with actual when available (historical), else forecast.
+          const savedEntries = savedResult.rows.map((row) => {
+            const monthPad = String(row.predicted_month).padStart(2, '0');
+            const dateKey = `${row.predicted_year}-${monthPad}`;
+            const actual = actualLookup.get(dateKey);
+            const predicted = Math.round(Number(row.predicted_arrivals));
+            const hasActual = actual !== undefined && actual > 0;
+
+            if (hasActual) {
+              return {
+                id: `sp-h-${row.predicted_year}-${monthPad}`,
+                actualOccupancy: actual,
+                predictedOccupancy: predicted,
+                error: Math.round(Math.abs(predicted - actual)),
+                date: `${row.predicted_year}-${monthPad}-01`,
+                location: 'Panglao',
+                accommodationType: 'Tourist Arrivals',
+              };
+            }
+            return {
+              id: `sp-f-${row.predicted_year}-${monthPad}`,
+              actualOccupancy: predicted,
+              predictedOccupancy: predicted,
+              error: 0,
+              date: `${row.predicted_year}-${monthPad}-01`,
+              location: 'Panglao',
+              accommodationType: 'Tourist Arrivals (Forecast)',
+            };
+          });
+
+          // Add live future predictions for months beyond what's in saved_predictions.
+          const savedKeys = new Set(
+            savedResult.rows.map(
+              (r) => `${r.predicted_year}-${String(r.predicted_month).padStart(2, '0')}`
+            )
+          );
+          const liveSeries = await buildForecastSeries(monthlyResult.rows, monthsAhead);
+          const liveFuture = liveSeries.filter((e) => {
+            const isF = String(e.id || '').startsWith('ml-f-')
+              || String(e.accommodationType || '').toLowerCase().includes('forecast');
+            if (!isF) return false;
+            const d = new Date(e.date);
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            return !savedKeys.has(key);
+          });
+
+          return res.json([...savedEntries, ...liveFuture]);
+        }
+      } catch (savedError) {
+        console.warn('[/api/forecasts] Saved predictions unavailable, falling back to live:', savedError.message);
+      }
+    }
+
+    // Model-specific or fresh-install fallback: full live Python prediction.
     if (!preferLegacy) {
       try {
         const monthlyResult = await query('SELECT * FROM monthly_tourism_dataset ORDER BY year, month');
@@ -1805,6 +2050,50 @@ app.use((error, _req, res, _next) => {
 
 ensureHolidayCacheTable().catch((error) => {
   console.error('Failed to ensure philippine_holiday_counts table exists:', error.message);
+});
+
+ensureSavedPredictionsTable().catch((error) => {
+  console.error('Failed to ensure saved_predictions table exists:', error.message);
+});
+
+// ── Auto-retrain scheduler ───────────────────────────────────────────────────
+// Runs on the 10th of every month at 01:00 AM server time.
+// Checks the previous month's submission rate via Panglao ITDMS API.
+// If submission rate ≥ 70% AND the previous month's data is in the DB,
+// it triggers compare-all and saves the winner's predictions.
+cron.schedule('0 1 10 * *', async () => {
+  const now = new Date();
+  // getMonth() is 0-based: January = 0. "Previous month" from the 10th.
+  const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+  const label = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
+  console.log(`[Auto-Retrain] Day-10 trigger: checking submission rate for ${label}`);
+  try {
+    const sub = await fetchPanglaoCheckinsSubmission(prevYear, prevMonth);
+    if (sub.submissionRatePercentage < 70) {
+      console.log(`[Auto-Retrain] Skipped — submission rate ${sub.submissionRatePercentage.toFixed(1)}% < 70% for ${label}`);
+      return;
+    }
+
+    const dbCheck = await query(
+      'SELECT arrivals FROM monthly_tourism_dataset WHERE year = $1 AND month = $2',
+      [prevYear, prevMonth]
+    );
+    if (dbCheck.rowCount === 0) {
+      console.log(`[Auto-Retrain] Skipped — no dataset row found for ${label}`);
+      return;
+    }
+
+    console.log(`[Auto-Retrain] Submission rate ${sub.submissionRatePercentage.toFixed(1)}% ≥ 70%. Starting retrain for ${label}.`);
+    const result = await compareAllModels(prevYear, prevMonth, 'xgboost_base');
+    if (result.winnerSeries) {
+      await savePredictionsFromRetrain(result.winnerSeries, prevYear, prevMonth, result.winner);
+    }
+    console.log(`[Auto-Retrain] Complete. Winner: ${result.winner} (${(result.winnerAccuracy * 100).toFixed(2)}% accuracy).`);
+  } catch (err) {
+    console.error(`[Auto-Retrain] Error for ${label}:`, err.message);
+  }
 });
 
 app.listen(PORT, () => {

@@ -108,6 +108,28 @@ CREATE TABLE IF NOT EXISTS monthly_tourism_dataset (
 CREATE INDEX IF NOT EXISTS idx_monthly_tourism_dataset_year_month
   ON monthly_tourism_dataset (year, month);
 
+-- Stores the winning model's predictions after each retrain:
+--   historical: test-set predictions from Jan 2024 onwards (updated on each retrain,
+--               but a month already saved as 'future' is never overwritten).
+--   future:     the next-month-ahead forecast locked in at retrain time (INSERT only,
+--               never updated, so the original out-of-sample forecast is preserved
+--               for accuracy comparison when real data later arrives).
+CREATE TABLE IF NOT EXISTS saved_predictions (
+  id TEXT PRIMARY KEY,
+  predicted_year INTEGER NOT NULL,
+  predicted_month INTEGER NOT NULL,
+  predicted_arrivals INTEGER NOT NULL,
+  trained_through_year INTEGER NOT NULL,
+  trained_through_month INTEGER NOT NULL,
+  model_name TEXT NOT NULL,
+  prediction_type TEXT NOT NULL CHECK (prediction_type IN ('historical', 'future')),
+  saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (predicted_year, predicted_month)
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_predictions_year_month
+  ON saved_predictions (predicted_year, predicted_month);
+
 CREATE TABLE IF NOT EXISTS philippine_holiday_counts (
   year INTEGER NOT NULL CHECK (year BETWEEN 1900 AND 2100),
   month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
