@@ -371,7 +371,7 @@ function mapPredictionOutput(output, historicalRows, extraCount = 0) {
   return [...historicalForecasts, ...extraHistoricalWithPredictions, ...extraHistoricalFallback, ...futureForecasts];
 }
 
-async function buildLSTMForecastSeries(monthlyRows, monthsAhead = 12) {
+async function buildLSTMForecastSeries(monthlyRows, monthsAhead = 12, options = {}) {
   const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
 
   // Identify post-CSV DB rows (year > 2025) with actual arrivals — need predictions for these too
@@ -418,8 +418,8 @@ async function buildLSTMForecastSeries(monthlyRows, monthsAhead = 12) {
 
   const output = await runPythonScript(PYTHON_LSTM_PREDICT_SCRIPT, {
     datasetPath: LSTM_DATASET_PATH,
-    scalerPath: LSTM_SCALER_PATH,
-    modelPath: LSTM_MODEL_PATH,
+    scalerPath: options.scalerPath || LSTM_SCALER_PATH,
+    modelPath: options.modelPath || LSTM_MODEL_PATH,
     futureMonths,
   });
 
@@ -472,7 +472,7 @@ async function buildXGBoostZipForecastSeries(monthlyRows, monthsAhead = 12) {
   return mapPredictionOutput(output, historicalRows, postCsvRows.length);
 }
 
-async function buildRFForecastSeries(monthlyRows, monthsAhead = 12) {
+async function buildRFForecastSeries(monthlyRows, monthsAhead = 12, options = {}) {
   const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
 
   // Identify post-CSV DB rows (year > 2025) with actual arrivals — need predictions for these too
@@ -503,7 +503,7 @@ async function buildRFForecastSeries(monthlyRows, monthsAhead = 12) {
 
   const output = await runPythonScript(PYTHON_RF_SCRIPT, {
     datasetPath: DATASET_PATH,
-    zipPath: RF_ZIP_PATH,
+    zipPath: options.zipPath || RF_ZIP_PATH,
     futureMonths,
   });
 
@@ -514,7 +514,7 @@ async function buildRFForecastSeries(monthlyRows, monthsAhead = 12) {
   return mapPredictionOutput(output, historicalRows, postCsvRows.length);
 }
 
-async function buildProphetForecastSeries(monthlyRows, monthsAhead = 12) {
+async function buildProphetForecastSeries(monthlyRows, monthsAhead = 12, options = {}) {
   const historicalRows = [...monthlyRows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
 
   // Identify post-CSV DB rows (year > 2025) with actual arrivals — need predictions for these too
@@ -536,7 +536,7 @@ async function buildProphetForecastSeries(monthlyRows, monthsAhead = 12) {
 
   const output = await runPythonScript(PYTHON_PROPHET_SCRIPT, {
     datasetPath: DATASET_PATH,
-    zipPath: PROPHET_ZIP_PATH,
+    zipPath: options.zipPath || PROPHET_ZIP_PATH,
     futureMonths,
   });
 
@@ -591,6 +591,11 @@ module.exports = {
   MODEL_FILE,
   MODEL_METADATA_FILE,
   ML_MODEL,
+  DB_DIR,
+  RF_ZIP_PATH,
+  PROPHET_ZIP_PATH,
+  LSTM_MODEL_PATH,
+  LSTM_SCALER_PATH,
   monthNameToNumber,
   getModelStatus,
   retrainLocalModel,

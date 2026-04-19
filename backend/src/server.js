@@ -21,6 +21,11 @@ const {
   buildProphetForecastSeries,
   buildLSTMForecastSeries,
   ML_MODEL,
+  DB_DIR: ML_DB_DIR,
+  RF_ZIP_PATH,
+  PROPHET_ZIP_PATH,
+  LSTM_MODEL_PATH,
+  LSTM_SCALER_PATH,
 } = require('./ml/tourismModelService');
 
 const app = express();
@@ -307,6 +312,10 @@ const monthNumberToName = (monthNumber) => MONTH_NAMES[Number(monthNumber) - 1] 
 
 const resolveModelFileByVersion = (version) => path.resolve(MODEL_STORAGE_DIR, `${version}.json`);
 const resolveMetadataFileByVersion = (version) => path.resolve(MODEL_STORAGE_DIR, `${version}_metadata.json`);
+const resolveRFZipByVersion = (version) => path.join(ML_DB_DIR, `${version}.zip`);
+const resolveProphetZipByVersion = (version) => path.join(ML_DB_DIR, `${version}.zip`);
+const resolveLSTMModelByVersion = (version) => path.join(ML_DB_DIR, 'lstm_model_extracted', `${version}.keras`);
+const resolveLSTMScalerByVersion = (version) => path.join(ML_DB_DIR, 'lstm_model_extracted', `scaler_${version}.pkl`);
 
 const toTrainingPayloadRow = (row) => {
   const top10MarketHolidaysValue = Number(row.top_10_market_holidays);
@@ -1058,9 +1067,10 @@ app.post('/api/ml/trained-models/:id/use', async (req, res, next) => {
     }
 
     const version = target.rows[0].version;
+    const versionLower = version.toLowerCase();
 
-    // Only XGBoost has local model artifact files — skip file copy for other model types
-    if (version.toLowerCase().startsWith('xgboost')) {
+    // Copy the versioned artifact to the active (base) model path for each model type
+    if (versionLower.startsWith('xgboost')) {
       const selectedModelFile = resolveModelFileByVersion(version);
       const selectedMetadataFile = resolveMetadataFileByVersion(version);
       const status = getModelStatus();
@@ -1072,6 +1082,29 @@ app.post('/api/ml/trained-models/:id/use', async (req, res, next) => {
       }
       fs.copyFileSync(selectedModelFile, status.localModelFile);
       fs.copyFileSync(selectedMetadataFile, status.localMetadataFile);
+    } else if (versionLower.startsWith('random_forest')) {
+      const versionedZip = resolveRFZipByVersion(version);
+      if (!fs.existsSync(versionedZip)) {
+        return res.status(400).json({ error: 'Model artifact file is missing', details: { versionedZip } });
+      }
+      fs.copyFileSync(versionedZip, RF_ZIP_PATH);
+    } else if (versionLower.startsWith('prophet')) {
+      const versionedZip = resolveProphetZipByVersion(version);
+      if (!fs.existsSync(versionedZip)) {
+        return res.status(400).json({ error: 'Model artifact file is missing', details: { versionedZip } });
+      }
+      fs.copyFileSync(versionedZip, PROPHET_ZIP_PATH);
+    } else if (versionLower.startsWith('lstm')) {
+      const versionedModel = resolveLSTMModelByVersion(version);
+      const versionedScaler = resolveLSTMScalerByVersion(version);
+      if (!fs.existsSync(versionedModel) || !fs.existsSync(versionedScaler)) {
+        return res.status(400).json({
+          error: 'Model artifact files are missing',
+          details: { versionedModel, versionedScaler },
+        });
+      }
+      fs.copyFileSync(versionedModel, LSTM_MODEL_PATH);
+      fs.copyFileSync(versionedScaler, LSTM_SCALER_PATH);
     }
 
     // Archive ALL model versions before activating the selected one
@@ -1274,44 +1307,85 @@ async function compareAllModels(year, month, baseModelName) {
     results.xgboost = { error: err.message, accuracy: 0 };
   }
 
-  // ── 2–4. LSTM / Random Forest / Prophet – retrain weights then compute MAPE ──
+  // ── 2–4. LSTM / Random Forest / Prophet – retrain to versioned paths then compute MAPE ──
   const trainingPayloadRowsOther = trainingRows.rows.map(toTrainingPayloadRow);
+
+  const lstmVersion = `lstm_${monthName}_${year}`;
+  const rfVersion = `random_forest_${monthName}_${year}`;
+  const prophetVersion = `prophet_${monthName}_${year}`;
 
   const evalModels = [
     {
       id: 'lstm',
       label: 'LSTM',
-      retrainFn: () => retrainLSTMModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
-      buildFn: () => buildLSTMForecastSeries(trainingRows.rows, 1),
+      modelVersion: lstmVersion,
+      retrainFn: () => retrainLSTMModel({
+        rows: trainingPayloadRowsOther,
+        modelPath: resolveLSTMModelByVersion(lstmVersion),
+        scalerPath: resolveLSTMScalerByVersion(lstmVersion),
+        cutoffYear: year,
+        cutoffMonth: month,
+      }),
+      buildOpts: {
+        modelPath: resolveLSTMModelByVersion(lstmVersion),
+        scalerPath: resolveLSTMScalerByVersion(lstmVersion),
+      },
+      buildFn: (opts) => buildLSTMForecastSeries(trainingRows.rows, 1, opts),
     },
     {
       id: 'random_forest',
       label: 'Random Forest',
-      retrainFn: () => retrainRFModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
-      buildFn: () => buildRFForecastSeries(trainingRows.rows, 1),
+      modelVersion: rfVersion,
+      retrainFn: () => retrainRFModel({
+        rows: trainingPayloadRowsOther,
+        zipPath: resolveRFZipByVersion(rfVersion),
+        cutoffYear: year,
+        cutoffMonth: month,
+      }),
+      buildOpts: { zipPath: resolveRFZipByVersion(rfVersion) },
+      buildFn: (opts) => buildRFForecastSeries(trainingRows.rows, 1, opts),
     },
     {
       id: 'prophet',
       label: 'Prophet',
-      retrainFn: () => retrainProphetModel({ rows: trainingPayloadRowsOther, cutoffYear: year, cutoffMonth: month }),
-      buildFn: () => buildProphetForecastSeries(trainingRows.rows, 1),
+      modelVersion: prophetVersion,
+      retrainFn: () => retrainProphetModel({
+        rows: trainingPayloadRowsOther,
+        zipPath: resolveProphetZipByVersion(prophetVersion),
+        cutoffYear: year,
+        cutoffMonth: month,
+      }),
+      buildOpts: { zipPath: resolveProphetZipByVersion(prophetVersion) },
+      buildFn: (opts) => buildProphetForecastSeries(trainingRows.rows, 1, opts),
     },
   ];
 
   for (const m of evalModels) {
-    // Retrain model weights and capture test-set metrics from the train script.
-    // Fall through to evaluate with existing model on failure.
+    const jobId = `job-cmp-${m.id}-${Date.now()}`;
+    await query(
+      'INSERT INTO retraining_jobs (id, model_id, status, start_time) VALUES ($1, $2, $3, NOW())',
+      [jobId, m.modelVersion, 'running']
+    );
+
+    // Retrain to the versioned path; fall back to base model on failure.
     let retrainMetrics = null;
+    let retrainSucceeded = false;
     try {
       const retrainResult = await m.retrainFn();
       retrainMetrics = retrainResult?.metrics || null;
-      console.log(`[compareAllModels] ${m.label} retrained successfully.`);
+      retrainSucceeded = true;
+      console.log(`[compareAllModels] ${m.label} retrained successfully → ${m.modelVersion}.`);
     } catch (retrainErr) {
       console.warn(`[compareAllModels] ${m.label} retrain failed (using existing model): ${retrainErr.message}`);
+      await query(
+        'UPDATE retraining_jobs SET status = $1, end_time = NOW(), error_message = $2 WHERE id = $3',
+        ['failed', retrainErr.message, jobId]
+      ).catch(() => {});
     }
 
     try {
-      const series = await m.buildFn();
+      // Use the versioned model for evaluation if retrain succeeded, otherwise fall back to base model.
+      const series = await m.buildFn(retrainSucceeded ? m.buildOpts : {});
       seriesMap[m.id] = series;
 
       // Prefer the train-script's test-set MAPE (fair comparison, same holdout as XGBoost).
@@ -1326,6 +1400,7 @@ async function compareAllModels(year, month, baseModelName) {
         );
         if (historical.length === 0) {
           results[m.id] = { accuracy: 0, mape: 100, error: 'No historical predictions returned' };
+          await query('UPDATE retraining_jobs SET status = $1, end_time = NOW() WHERE id = $2', ['completed', jobId]).catch(() => {});
           continue;
         }
         mape = historical.reduce((sum, e) => {
@@ -1333,20 +1408,29 @@ async function compareAllModels(year, month, baseModelName) {
         }, 0) / historical.length * 100;
         accuracy = Math.max(0, Math.min(1, 1 - (mape / 100)));
       }
-      results[m.id] = { accuracy, mape };
-      console.log(`[compareAllModels] ${m.id} accuracy=${accuracy} mape=${mape} monthName=${monthName} year=${year}`);
-      if (accuracy > 0) {
-        const delResult = await query('DELETE FROM model_versions WHERE id = $1', [`mv-cmp-${m.id}-eval`]).catch(e => { console.error(`[compareAllModels] DELETE ${m.id} error:`, e.message); return null; });
-        console.log(`[compareAllModels] DELETE ${m.id} rowCount=${delResult?.rowCount}`);
-        const insResult = await query(
+
+      let versionId;
+      if (accuracy > 0 && retrainSucceeded) {
+        await query('DELETE FROM model_versions WHERE version = $1', [m.modelVersion]).catch(() => {});
+        versionId = `mv-cmp-${m.id}-${Date.now()}`;
+        await query(
           `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
            VALUES ($1, $2, NOW(), $3, $3, $3, 'archived')`,
-          [`mv-cmp-${m.id}-eval`, `${m.id}_eval_${monthName}_${year}`, accuracy]
-        ).catch(e => { console.error(`[compareAllModels] INSERT ${m.id} error:`, e.message); return null; });
-        console.log(`[compareAllModels] INSERT ${m.id} rowCount=${insResult?.rowCount}`);
+          [versionId, m.modelVersion, accuracy]
+        ).catch(e => { console.error(`[compareAllModels] INSERT ${m.id} error:`, e.message); });
       }
+      results[m.id] = { versionId, modelVersion: m.modelVersion, accuracy, mape };
+      console.log(`[compareAllModels] ${m.id} accuracy=${accuracy} mape=${mape} monthName=${monthName} year=${year}`);
+      await query(
+        'UPDATE retraining_jobs SET status = $1, end_time = NOW(), accuracy = $2 WHERE id = $3',
+        ['completed', accuracy, jobId]
+      ).catch(() => {});
     } catch (err) {
       results[m.id] = { error: err.message, accuracy: 0 };
+      await query(
+        'UPDATE retraining_jobs SET status = $1, end_time = NOW(), error_message = $2 WHERE id = $3',
+        ['failed', err.message, jobId]
+      ).catch(() => {});
     }
   }
 
@@ -1356,12 +1440,13 @@ async function compareAllModels(year, month, baseModelName) {
     return (results[id]?.accuracy ?? 0) > (results[best]?.accuracy ?? 0) ? id : best;
   }, modelIds[0]);
 
-  // Archive all XGBoost rows; activate winner if it is XGBoost.
+  // Archive all XGBoost rows from previous runs; activate the winner's versioned entry.
   await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'").catch(() => {});
-  if (winner === 'xgboost' && results.xgboost?.versionId) {
+  const winnerVersionId = results[winner]?.versionId;
+  if (winnerVersionId) {
     await query(
       "UPDATE model_versions SET status = 'active' WHERE id = $1",
-      [results.xgboost.versionId]
+      [winnerVersionId]
     ).catch(() => {});
   }
 
@@ -2057,23 +2142,54 @@ ensureSavedPredictionsTable().catch((error) => {
 });
 
 // ── Auto-retrain scheduler ───────────────────────────────────────────────────
-// Runs on the 10th of every month at 01:00 AM server time.
-// Checks the previous month's submission rate via Panglao ITDMS API.
-// If submission rate ≥ 70% AND the previous month's data is in the DB,
-// it triggers compare-all and saves the winner's predictions.
-cron.schedule('0 1 10 * *', async () => {
+// Runs every day at 23:59 PM server time.
+// On the 10th: first scheduled attempt for the previous month.
+// On the 11th to 2nd-to-last day: retries daily if submission rate < 70%.
+// On the last day of the month (deadline override): retrains regardless of
+//   submission rate so the model never falls more than one month behind.
+// Stops retrying once a completion marker exists for that month.
+// The frontend never triggers retraining — it only reads results and shows notifications.
+cron.schedule('59 23 * * *', async () => {
   const now = new Date();
-  // getMonth() is 0-based: January = 0. "Previous month" from the 10th.
   const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
   const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
   const label = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+  const markerId = `auto-cron-${label}`;
+  const markerModelId = `auto_cron_${prevYear}_${String(prevMonth).padStart(2, '0')}`;
 
-  console.log(`[Auto-Retrain] Day-10 trigger: checking submission rate for ${label}`);
+  // Determine last day of the current calendar month
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const isLastDay = now.getDate() === lastDayOfMonth;
+
+  // Only start attempting from the 10th of the month onwards
+  if (now.getDate() < 10) return;
+
+  // Check if this month's retrain is already completed — if so, nothing to do
+  try {
+    const existing = await query(
+      "SELECT id FROM retraining_jobs WHERE id = $1 AND status = 'completed'",
+      [markerId]
+    );
+    if (existing.rowCount > 0) {
+      console.log(`[Auto-Retrain] Already completed for ${label} — skipping.`);
+      return;
+    }
+  } catch (e) {
+    console.warn('[Auto-Retrain] Could not check completion marker:', e.message);
+  }
+
+  console.log(`[Auto-Retrain] Checking submission rate for ${label} (day ${now.getDate()}${isLastDay ? ' — DEADLINE' : ''})`);
   try {
     const sub = await fetchPanglaoCheckinsSubmission(prevYear, prevMonth);
-    if (sub.submissionRatePercentage < 70) {
-      console.log(`[Auto-Retrain] Skipped — submission rate ${sub.submissionRatePercentage.toFixed(1)}% < 70% for ${label}`);
+    const submissionRate = sub.submissionRatePercentage;
+
+    if (submissionRate < 70 && !isLastDay) {
+      console.log(`[Auto-Retrain] Skipped — submission rate ${submissionRate.toFixed(1)}% < 70% for ${label}. Will retry tomorrow.`);
       return;
+    }
+
+    if (submissionRate < 70 && isLastDay) {
+      console.log(`[Auto-Retrain] Deadline override — submission rate ${submissionRate.toFixed(1)}% < 70% but end of month reached. Forcing retrain for ${label}.`);
     }
 
     const dbCheck = await query(
@@ -2081,15 +2197,22 @@ cron.schedule('0 1 10 * *', async () => {
       [prevYear, prevMonth]
     );
     if (dbCheck.rowCount === 0) {
-      console.log(`[Auto-Retrain] Skipped — no dataset row found for ${label}`);
+      console.log(`[Auto-Retrain] Skipped — no dataset row found for ${label}${isLastDay ? ' (deadline reached but no data available)' : ''}. Will retry tomorrow.`);
       return;
     }
 
-    console.log(`[Auto-Retrain] Submission rate ${sub.submissionRatePercentage.toFixed(1)}% ≥ 70%. Starting retrain for ${label}.`);
+    console.log(`[Auto-Retrain] Starting retrain for ${label} (submission rate: ${submissionRate.toFixed(1)}%).`);
     const result = await compareAllModels(prevYear, prevMonth, 'xgboost_base');
     if (result.winnerSeries) {
       await savePredictionsFromRetrain(result.winnerSeries, prevYear, prevMonth, result.winner);
     }
+    // Write completion marker so the frontend detects this run and shows a notification
+    await query(
+      `INSERT INTO retraining_jobs (id, model_id, status, start_time, end_time, accuracy)
+       VALUES ($1, $2, 'completed', NOW(), NOW(), $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [markerId, markerModelId, result.winnerAccuracy]
+    ).catch((e) => console.warn('[Auto-Retrain] Could not write completion marker:', e.message));
     console.log(`[Auto-Retrain] Complete. Winner: ${result.winner} (${(result.winnerAccuracy * 100).toFixed(2)}% accuracy).`);
   } catch (err) {
     console.error(`[Auto-Retrain] Error for ${label}:`, err.message);

@@ -14,6 +14,7 @@ import {
   getMonthlyTourismDataset,
   getTop10MarketHolidays,
   getTrainedModels,
+  getRetrainingJobs,
   useTrainedModel,
   getCheckinsSubmission,
   CheckinsSubmissionData,
@@ -159,6 +160,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     try { return JSON.parse(localStorage.getItem('ml-future-checkins') ?? 'null') as CheckinsSubmissionData | null; }
     catch { return null; }
   });
+  const [simulateCheckinsSubmission, setSimulateCheckinsSubmission] = useState<CheckinsSubmissionData | null>(null);
+  const [simulateCheckinsLoading, setSimulateCheckinsLoading] = useState(false);
   const [trainedModels, setTrainedModels] = useState<TrainedModel[]>([]);
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('xgboost');
@@ -178,14 +181,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     catch { return []; }
   });
   const [predictionHorizonMonths, setPredictionHorizonMonths] = useState<3 | 6 | 12>(3);
-  const [simulateMonth, setSimulateMonth] = useState(() => {
-    const now = new Date();
-    // Default to previous month so manual retrain targets the same period as auto-retrain
-    return now.getMonth() === 0 ? 12 : now.getMonth(); // getMonth() is 0-indexed, so no +1 = previous month
-  });
   const [simulateYear, setSimulateYear] = useState(() => {
     const now = new Date();
-    return now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    return Math.max(prevYear, 2025);
+  });
+  const [simulateMonth, setSimulateMonth] = useState(() => {
+    const now = new Date();
+    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+    // 2025 only has December available
+    if (prevYear <= 2025) return 12;
+    return prevMonth;
   });
   const [isSimulating, setIsSimulating] = useState(false);
   const [lastCompareResult, setLastCompareResult] = useState<CompareAllRetrainResult | null>(() => {
@@ -237,7 +244,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     const label = MODEL_LABELS[prefix] ?? prefix.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     return `${label}_${month.charAt(0).toUpperCase() + month.slice(1)}_${year}`;
   };
-  const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);
+  const years = Array.from({ length: 2030 - 2016 + 1 }, (_, i) => 2016 + i);       // dashboard tab
+  const trainingYears = Array.from({ length: 2030 - 2025 + 1 }, (_, i) => 2025 + i); // training parameters
 
   useEffect(() => {
     const clockTimer = setInterval(() => {
@@ -298,6 +306,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadData]);
+
+  /**
+   * Page-load catch-up: check if the backend auto-retrained this month while
+   * the dashboard was closed, and surface a notification if so.
+   * Runs once on mount (after initial loadData). Skipped in mock mode.
+   */
+  useEffect(() => {
+    const checkMissedAutoRetrain = async () => {
+      try {
+        const jobs = await getRetrainingJobs();
+        const now = new Date();
+        const currentMonth = now.getMonth() + 1;
+        const currentYear = now.getFullYear();
+        const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+        const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+        const notifId = `auto-retrain-catchup-${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
+        const cronJob = jobs.find(
+          (job) => job.modelId === `auto_cron_${prevYear}_${String(prevMonth).padStart(2, '0')}` && job.status === 'completed'
+        );
+
+        if (!cronJob) return;
+
+        // Don't resurface if we already showed this notification
+        const alreadyShown = JSON.parse(localStorage.getItem('ml-notifications') ?? '[]') as { id: string }[];
+        if (alreadyShown.some((n) => n.id === notifId)) return;
+
+        const trainedModels = await getTrainedModels();
+        const activeModel = trainedModels.find((m) => m.inUse);
+        const modelLookup: Record<string, string> = { xgboost: 'XGBoost', lstm: 'LSTM', random_forest: 'Random Forest', prophet: 'Prophet' };
+        const rawName = (activeModel?.modelName ?? '').toLowerCase();
+        const algoKey = Object.keys(modelLookup).find((k) => rawName.startsWith(k)) ?? '';
+        const winnerLabel = modelLookup[algoKey] ?? activeModel?.modelName ?? 'Unknown';
+        const accuracy = activeModel?.accuracy != null ? ` (${(activeModel.accuracy * 100).toFixed(1)}%)` : '';
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const monthLabel = `${monthNames[prevMonth - 1]} ${prevYear}`;
+        const completedAt = cronJob.endTime ? new Date(cronJob.endTime).toLocaleString() : 'during your last session';
+
+        addNotification({
+          id: notifId,
+          title: 'Auto-Retraining Completed (Background)',
+          description: `The backend automatically retrained all 4 models for ${monthLabel} on ${completedAt}. Active model: ${winnerLabel}${accuracy}.`,
+          timestamp: cronJob.endTime ?? new Date().toISOString(),
+        });
+      } catch {
+        // Non-critical — silently skip if API is unavailable
+      }
+    };
+
+    checkMissedAutoRetrain();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSimulateMonthlyRetraining = async () => {
     try {
@@ -384,12 +444,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   }, [autoRetrainingEnabled]);
 
   /**
-   * Auto-retraining scheduler:
-   * - Fires on the 10th of every month at 23:59
-   * - Checks the submission rate of the PREVIOUS month (e.g. on April 10 → checks March)
-   * - If previous month's submission rate < 70 %: skip, notify, and retry every subsequent day at 23:59
-   * - If previous month's submission rate >= 70 %: retrain all models with data up to previous month, notify success, clear pending state
-   * - Persists check state in localStorage so retries survive page refreshes
+   * Auto-retraining display checker:
+   * - Runs every minute while the dashboard is open
+   * - On the 10th of every month at 23:59 (and every day after until successful):
+   *   checks if the backend has completed retraining for the previous month
+   * - If completed → shows a success notification and reloads data
+   * - If not yet completed → shows a "pending" notification (backend will retry tomorrow)
+   * - The frontend NEVER triggers retraining — the backend owns all retrain logic
    */
   const runAutoRetrainCheck = useCallback(async () => {
     if (!autoRetrainingEnabled) return;
@@ -413,10 +474,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     sched.lastCheckedDay = todayStr;
     localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
 
-    // Derive the PREVIOUS month — this is the month whose submission rate we check
-    // and whose data we use as the training cutoff.
-    // e.g. trigger on April 10 → prevMonth = March, prevYear = same year
-    //      trigger on January 10 → prevMonth = December, prevYear = current year - 1
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth() + 1; // 1-indexed
     const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
@@ -424,59 +481,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     const monthLabel = `${months[prevMonth - 1]} ${prevYear}`;
 
     try {
-      const submission = await getCheckinsSubmission(prevYear, prevMonth);
-      const rate = submission.submissionRatePercentage;
+      const jobs = await getRetrainingJobs();
+      const backendCompleted = jobs.some(
+        (job) => job.modelId === `auto_cron_${prevYear}_${String(prevMonth).padStart(2, '0')}` && job.status === 'completed'
+      );
 
-      if (rate >= 70) {
-        // Retrain all models with data up to and including the previous month
-        const compareResult: CompareAllRetrainResult = await retrainAndCompareAll({ baseModelName: 'xgboost_base', month: prevMonth, year: prevYear });
-        setSelectedModel(compareResult.winner);
+      if (backendCompleted) {
+        // Backend finished — read result and notify
+        const trainedModels = await getTrainedModels();
+        const activeModel = trainedModels.find((m) => m.inUse);
+        const modelLookup: Record<string, string> = { xgboost: 'XGBoost', lstm: 'LSTM', random_forest: 'Random Forest', prophet: 'Prophet' };
+        const rawName = (activeModel?.modelName ?? '').toLowerCase();
+        const algoKey = Object.keys(modelLookup).find((k) => rawName.startsWith(k)) ?? '';
+        const winnerLabel = modelLookup[algoKey] ?? activeModel?.modelName ?? 'Unknown';
+        const accuracy = activeModel?.accuracy != null ? ` (${(activeModel.accuracy * 100).toFixed(1)}%)` : '';
 
-        // Clear retry state — next run is the 10th of next month
         sched.pendingRetrainSince = null;
         localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
-
-        const winnerLabel = getModelLabel(compareResult.winner);
-        const modelSummary = ['xgboost', 'lstm', 'random_forest', 'prophet']
-          .map((id) => {
-            const r = compareResult.results[id];
-            const acc = r?.accuracy != null ? ` (${(r.accuracy * 100).toFixed(1)}%)` : '';
-            return `${getModelLabel(id)}${acc}`;
-          })
-          .join(', ');
 
         addNotification({
           id: `auto-retrain-success-${todayStr}`,
           title: 'Auto-Retraining Completed',
-          description: `All 4 models retrained using data up to ${monthLabel}. Submission rate: ${rate.toFixed(2)}%. Winner: ${winnerLabel} (${(compareResult.winnerAccuracy * 100).toFixed(1)}%). Scores — ${modelSummary}. Next run: 10th of next month at 11:59 PM.`,
+          description: `Backend automatically retrained all 4 models using data up to ${monthLabel}. Active model: ${winnerLabel}${accuracy}. Next run: 10th of next month at 11:59 PM.`,
           timestamp: now.toISOString(),
         });
-        addToast(`Auto-retraining done. Best model: ${winnerLabel}`, 'success');
+        addToast(`Auto-retraining done. Active: ${winnerLabel}`, 'success');
         await loadData();
       } else {
-        // Record the first failed attempt date (keep existing if already set)
+        // Backend hasn't finished yet — it will retry tomorrow night
         if (!sched.pendingRetrainSince) {
           sched.pendingRetrainSince = todayStr;
           localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
         }
 
         addNotification({
-          id: `auto-retrain-skipped-${todayStr}`,
-          title: 'Auto-Retraining Skipped',
-          description: `Auto-retraining was skipped — ${monthLabel} submission rate ${rate.toFixed(2)}% is below 70%. Will retry tomorrow at 11:59 PM.`,
+          id: `auto-retrain-pending-${todayStr}`,
+          title: 'Auto-Retraining Pending',
+          description: `Scheduled retraining for ${monthLabel} has not completed yet (submission rate may be below 70%). The backend will retry automatically tomorrow at 11:59 PM.`,
           timestamp: now.toISOString(),
         });
       }
     } catch (err) {
-      // On error, keep pendingRetrainSince so we retry tomorrow
       if (!sched.pendingRetrainSince) {
         sched.pendingRetrainSince = todayStr;
         localStorage.setItem('ml-auto-retrain-scheduler', JSON.stringify(sched));
       }
       addNotification({
         id: `auto-retrain-error-${todayStr}`,
-        title: 'Auto-Retraining Failed',
-        description: `Scheduled retraining check failed: ${err instanceof Error ? err.message : 'Unknown error'}. Will retry tomorrow at 11:59 PM.`,
+        title: 'Auto-Retraining Check Failed',
+        description: `Could not check retraining status: ${err instanceof Error ? err.message : 'Unknown error'}. Will check again tomorrow at 11:59 PM.`,
         timestamp: now.toISOString(),
       });
     }
@@ -656,6 +709,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     );
     setManualIsLockdown(selectedCutoffMonthlyRecord.isLockdown ? 'yes' : 'no');
   }, [selectedCutoffMonthlyRecord]);
+
+  useEffect(() => {
+    // Years ≤ 2025 use the CSV dataset — data is fully available, so submission rate is 100%.
+    // Years ≥ 2026 use the live Panglao ITDMS API.
+    if (simulateYear <= 2025) {
+      setSimulateCheckinsSubmission({ year: simulateYear, month: simulateMonth, totalCheckIns: 0, submissionRatePercentage: 100 });
+      setSimulateCheckinsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSimulateCheckinsLoading(true);
+    setSimulateCheckinsSubmission(null);
+    getCheckinsSubmission(simulateYear, simulateMonth)
+      .then((data) => { if (!cancelled) setSimulateCheckinsSubmission(data); })
+      .catch(() => { if (!cancelled) setSimulateCheckinsSubmission(null); })
+      .finally(() => { if (!cancelled) setSimulateCheckinsLoading(false); });
+    return () => { cancelled = true; };
+  }, [simulateYear, simulateMonth]);
 
   useEffect(() => {
     if (dashboardYear < 2026) {
@@ -1650,20 +1721,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             </div>
                           )}
 
-                          {/* Current Model */}
-                          <div className={`rounded-lg p-3 border flex items-center gap-3 ${isDarkMode ? 'bg-blue-950 border-blue-800' : 'bg-blue-50 border-blue-200'}`}>
-                            <svg className="h-5 w-5 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <ellipse cx="12" cy="5" rx="9" ry="3" />
-                              <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
-                              <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
-                            </svg>
-                            <div>
-                              <p className={`text-xs font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>Active Model</p>
-                              <p className="text-sm font-semibold break-all">
-                                {selectedModel
-                                  ? getModelLabel(selectedModel)
-                                  : 'No model selected'}
+                          {/* Selected month stats — Total Tourists + Submission Rate */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className={`rounded-lg p-3 border ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                              <p className={`text-xs ${isDarkMode ? 'text-sky-400' : 'text-sky-600'}`}>Total Tourists</p>
+                              <p className="mt-1 font-bold text-sm">
+                                {selectedCutoffMonthlyRecord
+                                  ? selectedCutoffMonthlyRecord.arrivals.toLocaleString()
+                                  : <span className={`${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>No data</span>}
                               </p>
+                              <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{months[simulateMonth - 1]} {simulateYear}</p>
+                            </div>
+                            <div className={`rounded-lg p-3 border ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                              <p className={`text-xs ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>Submission Rate</p>
+                              <p className="mt-1 font-bold text-sm">
+                                {simulateCheckinsLoading
+                                  ? <span className={`${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Loading…</span>
+                                  : simulateCheckinsSubmission
+                                    ? `${simulateCheckinsSubmission.submissionRatePercentage.toFixed(2)}%`
+                                    : <span className={`${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>—</span>}
+                              </p>
+                              <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{months[simulateMonth - 1]} {simulateYear}</p>
                             </div>
                           </div>
 
@@ -1678,19 +1756,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                   onChange={(e) => setSimulateMonth(Number(e.target.value))}
                                   className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
                                 >
-                                  {months.map((m, i) => (
-                                    <option key={i + 1} value={i + 1}>{m}</option>
-                                  ))}
+                                  {months.map((m, i) => {
+                                    if (simulateYear === 2025 && i + 1 !== 12) return null;
+                                    return <option key={i + 1} value={i + 1}>{m}</option>;
+                                  })}
                                 </select>
                               </div>
                               <div>
                                 <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Year</label>
                                 <select
                                   value={simulateYear}
-                                  onChange={(e) => setSimulateYear(Number(e.target.value))}
+                                  onChange={(e) => {
+                                    const y = Number(e.target.value);
+                                    setSimulateYear(y);
+                                    if (y === 2025) setSimulateMonth(12);
+                                  }}
                                   className={`w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${isDarkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
                                 >
-                                  {years.map((y) => (
+                                  {trainingYears.map((y) => (
                                     <option key={y} value={y}>{y}</option>
                                   ))}
                                 </select>

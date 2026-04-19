@@ -1,0 +1,37 @@
+[33m711bad9[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m feat: add model prediction functionality and enhance dashboard with prediction chart
+[33me4d737e[m Add new model training scripts and metadata for LSTM, Prophet, and Random Forest
+[33m1107492[m feat: update model metadata timestamp, enhance trained models API response, and improve dashboard UI
+[33me35a05d[m Add new ML prediction scripts and XGBoost model metadata
+[33m7986d22[m feat: enhance Docker setup and frontend functionality
+[33m084b81b[m feat: add Philippine holiday counts caching and update dashboard holiday count handling
+[33mcc35eb0[m feat: add Panglao check-ins submission API integration and update dashboard for manual inflation and lockdown inputs
+[33m096c37e[m feat: update historical dataset handling and API integration
+[33m3adf36b[m Refactor holiday data processing and improve dashboard components
+[33m61709eb[m feat: enhance forecasting features with dynamic monthsAhead parameter and UI updates
+[33m1bd553f[m feat: add tourism prediction model and training scripts
+[33m066eef7[m Refactor code structure for improved readability and maintainability
+[33m2c67d26[m feat: implement monthly tourism dataset integration; update Dashboard and API services
+[33me1ec6c3[m feat: add database schema for ML models and monthly tourism dataset; update server and dashboard components
+[33m83b4cc9[m feat: integrate Philippine holidays API; add holiday data fetching to Dashboard
+[33ma98ef6e[m feat: update Dashboard layout for improved visual clarity and consistency
+[33m95a6d85[m feat: add MonthlyTouristArrivalsDataChart and TouristParametersBarChart components; integrate into Dashboard
+[33m8f751a0[m feat: enhance type safety in DataExport, MemoMetricsCard, and Settings components; update chart font weight definition
+[33mc3c58d7[m feat: simplify Dashboard component by removing alerts functionality and updating navigation structure
+[33m8da32d7[m feat: update Dashboard layout and improve section titles for clarity
+[33m835e6fc[m feat: refactor Dashboard and Settings components for improved state management and dark mode support
+[33m689349a[m feat: update TouristForecastTrendChart and Dashboard with new icon components and styling adjustments
+[33m45c63e3[m feat: integrate Open-Meteo API for monthly weather data and implement fallback logic
+[33m2330de8[m feat: Implement organized tab navigation structure with new components and updated user guides
+[33med5685d[m feat: enhance DriftAlertCard and Dashboard with alert notifications and improved alert handling
+[33mad63e62[m feat: enhance Dashboard with month/year selection and update forecast display
+[33mef69049[m feat: add TouristForecastTrendChart component to display monthly tourist trends
+[33m3d6af93[m feat: update package dependencies and enhance Dashboard with data quality metrics
+[33m7242b0f[m feat: update title and enhance Dashboard with predicted accommodation demand metrics and About section
+[33m294fcdd[m refactor: simplify layout in Dashboard by removing unnecessary button group
+[33mc1cb12c[m refactor: improve Dashboard layout with updated button styles and current date/time display
+[33m3447e1c[m feat: update title and enhance Dashboard with settings button and dark mode toggle
+[33m00d69b4[m feat: enhance Dashboard layout with current date/time display and improved navigation
+[33md174b53[m fix: update handleCheckEndpoint to support silent success option and remove APIEndpointCard from Dashboard
+[33me442623[m fix: enhance layout and button alignment in RetrainingJobCard component
+[33mb0fc049[m feat: initialize backend for ML monitoring
+[33m46fed1f[m Initial commit
