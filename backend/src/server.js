@@ -1479,8 +1479,10 @@ async function compareAllModels(year, month, baseModelName, triggerType = 'manua
     return (results[id]?.accuracy ?? 0) > (results[best]?.accuracy ?? 0) ? id : best;
   }, modelIds[0]);
 
-  // Archive all XGBoost rows from previous runs; activate the winner's versioned entry.
-  await query("UPDATE model_versions SET status = 'archived' WHERE lower(version) LIKE 'xgboost%'").catch(() => {});
+  // Archive all currently active models and activate the winner.
+  // Manual retrains only reach here if tourist data exists (checked in the HTTP handler).
+  // Auto-retrains always activate the winner of the previous month.
+  await query("UPDATE model_versions SET status = 'archived' WHERE status = 'active'").catch(() => {});
   const winnerVersionId = results[winner]?.versionId;
   if (winnerVersionId) {
     await query(
@@ -1526,6 +1528,16 @@ app.post('/api/ml/retrain/compare-all', async (req, res, next) => {
     }
     if (!Number.isInteger(month) || month < 1 || month > 12) {
       return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
+    }
+
+    // Reject if no tourist arrival data exists for the requested month — prevents accidental retrains
+    const dataCheck = await query(
+      'SELECT COALESCE(SUM(arrivals), 0)::int AS total FROM monthly_tourism_dataset WHERE year = $1 AND month = $2',
+      [year, month]
+    );
+    if (Number(dataCheck.rows[0]?.total ?? 0) === 0) {
+      const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      return res.status(400).json({ error: `No tourist arrival data found for ${monthNames[month - 1]} ${year}. Retraining cancelled.` });
     }
 
     const result = await compareAllModels(year, month, baseModelName, 'manual');

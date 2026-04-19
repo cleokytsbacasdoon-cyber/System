@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useDarkMode } from '../contexts/DarkModeContext';
-import { MetricsChart } from '../components/MetricsChart';
-import { PerformanceChart } from '../components/PerformanceChart';
 import { TouristForecastTrendChart } from '../components/TouristForecastTrendChart';
 import { MonthlyTouristArrivalsDataChart } from '../components/MonthlyTouristArrivalsDataChart';
-import { TouristParametersBarChart } from '../components/TouristParametersBarChart';
 import { 
   getModelMetrics, 
   getDriftAlerts, 
@@ -426,8 +423,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     });
   };
 
-  const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
-
   const MONTH_NAMES_LONG = ['january','february','march','april','may','june','july','august','september','october','november','december'];
 
   // Only show months that have at least one trained model entry
@@ -481,6 +476,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     });
     return map;
   }, [trainedModels, accuracyViewMonth, accuracyViewYear]);
+
+  const forecastPerformanceTable = useMemo(() => {
+    type ModelCell = { accuracy: number | null; inUse: boolean };
+    type RowEntry = { year: number; month: number; xgboost: ModelCell; lstm: ModelCell; random_forest: ModelCell; prophet: ModelCell };
+    const rowMap = new Map<string, RowEntry>();
+    trainedModels.forEach((model) => {
+      const parts = model.modelName.toLowerCase().split('_');
+      const mIdx = parts.findIndex((p) => MONTH_NAMES_LONG.includes(p));
+      if (mIdx === -1) return;
+      const month = MONTH_NAMES_LONG.indexOf(parts[mIdx]) + 1;
+      const year = parseInt(parts[mIdx + 1] ?? '');
+      if (!year) return;
+      if (year < 2025 || (year === 2025 && month < 12)) return;
+      const key = `${year}-${String(month).padStart(2, '0')}`;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, { year, month, xgboost: { accuracy: null, inUse: false }, lstm: { accuracy: null, inUse: false }, random_forest: { accuracy: null, inUse: false }, prophet: { accuracy: null, inUse: false } });
+      }
+      const row = rowMap.get(key)!;
+      const rawType = parts.slice(0, mIdx).filter((p) => p !== 'base' && p !== 'eval' && p !== 'winner').join('_') || 'xgboost';
+      const type = rawType.startsWith('xgboost') ? 'xgboost' as const
+        : rawType === 'lstm' ? 'lstm' as const
+        : rawType.startsWith('random_forest') ? 'random_forest' as const
+        : rawType === 'prophet' ? 'prophet' as const
+        : null;
+      if (!type) return;
+      const acc = model.accuracy ?? null;
+      if (acc !== null && (row[type].accuracy === null || acc > (row[type].accuracy ?? 0))) row[type].accuracy = acc;
+      if (model.inUse) row[type].inUse = true;
+    });
+    return Array.from(rowMap.values()).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  }, [trainedModels]);
+
   const addNotification = useCallback((item: NotificationItem) => {
     setNotifications((prev) => [item, ...prev.filter((existing) => existing.id !== item.id)].slice(0, 20));
   }, []);
@@ -1031,11 +1058,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     return top10MarketHolidayForSelectedMonth.reduce((sum, item) => sum + item.holidayCount, 0);
   }, [top10MarketHolidayForSelectedMonth]);
 
-  const top10MarketHolidayCount = useMemo(
-    () => top10MarketHolidayForSelectedMonth.reduce((sum, item) => sum + item.holidayCount, 0),
-    [top10MarketHolidayForSelectedMonth]
-  );
-
   const touristTrendParameters = useMemo<TouristTrendParameter[]>(() => {
     return [
       {
@@ -1096,25 +1118,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     { id: 'metrics', label: 'Metrics', icon: 'metrics' },
     { id: 'retraining', label: 'Model Parameters', icon: 'retraining' },
   ];
-
-  const touristParameterBarData = useMemo(
-    () => [
-      { label: 'Avg High Temp (C)', value: Number(Number(monthHighTempC ?? 0).toFixed(1)) },
-      { label: 'Avg Low Temp (C)', value: Number(Number(monthLowTempC ?? 0).toFixed(1)) },
-      { label: 'Precipitation (cm)', value: Number(Number(monthPrecipitationCm ?? 0).toFixed(1)) },
-      { label: 'Inflation Rate (%)', value: Number(Number(inflationRateValue).toFixed(2)) },
-      { label: 'PH Holidays', value: currentMonthHolidayCount ?? 0 },
-      { label: 'Top 10 Market Holidays', value: top10MarketHolidayCount },
-    ],
-    [
-      currentMonthHolidayCount,
-      inflationRateValue,
-      monthHighTempC,
-      monthLowTempC,
-      monthPrecipitationCm,
-      top10MarketHolidayCount,
-    ]
-  );
 
   const navigationItems: Array<{ id: string; label: string; icon: DashboardIconName }> = [...tabs];
   const activeSectionLabel = activeTab === 'about'
@@ -1568,31 +1571,80 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                   horizonSelectorValue={predictionHorizonMonths}
                   onHorizonSelectorChange={(value) => setPredictionHorizonMonths(value)}
                 />
-                <div className="pt-4 flex flex-col sm:flex-row sm:items-center gap-2">
-                  <select
-                    value={dashboardMonth}
-                    onChange={handleDashboardMonthChange}
-                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  >
-                    {months.map((month, i) => (
-                      <option key={month} value={i}>{month}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={dashboardYear}
-                    onChange={handleDashboardYearChange}
-                    className={`p-2 rounded border outline-none ${isDarkMode ? 'bg-slate-900 text-white border-slate-700' : 'bg-white border-gray-300'}`}
-                  >
-                    {years.map((year) => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </select>
+                {/* Forecasting Model Performance Table */}
+                <div className={`rounded-lg border overflow-hidden ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+                  <p className={`text-xl font-bold px-4 py-3 border-b ${isDarkMode ? 'text-gray-100 border-slate-700 bg-slate-900' : 'text-gray-800 border-gray-200 bg-gray-50'}`}>
+                    Forecasting Model Performance
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className={isDarkMode ? 'bg-slate-700 text-gray-200' : 'bg-gray-100 text-gray-700'}>
+                          <th className="px-4 py-3 text-left font-semibold">Month / Year</th>
+                          <th className="px-4 py-3 text-center font-semibold">XGBoost</th>
+                          <th className="px-4 py-3 text-center font-semibold">LSTM</th>
+                          <th className="px-4 py-3 text-center font-semibold">Random Forest</th>
+                          <th className="px-4 py-3 text-center font-semibold">Prophet</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {forecastPerformanceTable.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className={`px-4 py-6 text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              No model data available from December 2025 onwards
+                            </td>
+                          </tr>
+                        ) : (
+                          forecastPerformanceTable.map(({ year, month, xgboost, lstm, random_forest, prophet }, idx) => {
+                            const monthLabel = MONTH_NAMES_LONG[month - 1]
+                              ? MONTH_NAMES_LONG[month - 1].charAt(0).toUpperCase() + MONTH_NAMES_LONG[month - 1].slice(1)
+                              : String(month);
+                            const modelEntries = [
+                              { key: 'xgboost', data: xgboost },
+                              { key: 'lstm', data: lstm },
+                              { key: 'random_forest', data: random_forest },
+                              { key: 'prophet', data: prophet },
+                            ] as const;
+                            return (
+                              <tr
+                                key={`${year}-${month}`}
+                                className={idx % 2 === 0
+                                  ? (isDarkMode ? 'bg-slate-800' : 'bg-white')
+                                  : (isDarkMode ? 'bg-slate-750' : 'bg-gray-50')
+                                }
+                              >
+                                <td className={`px-4 py-3 font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+                                  {monthLabel} {year}
+                                </td>
+                                {modelEntries.map(({ key, data }) => (
+                                  <td key={key} className="px-4 py-3 text-center">
+                                    {data.accuracy !== null ? (
+                                      <span className={`inline-block px-2 py-0.5 rounded text-sm font-semibold ${
+                                        data.inUse
+                                          ? 'bg-green-100 text-green-800 ring-1 ring-green-500'
+                                          : (isDarkMode ? 'text-gray-200' : 'text-gray-700')
+                                      }`}>
+                                        {data.accuracy.toFixed(2)}%
+                                        {data.inUse && <span className="ml-1 text-xs font-normal">●</span>}
+                                      </span>
+                                    ) : (
+                                      <span className={isDarkMode ? 'text-gray-600' : 'text-gray-400'}>—</span>
+                                    )}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {forecastPerformanceTable.some((r) => r.xgboost.inUse || r.lstm.inUse || r.random_forest.inUse || r.prophet.inUse) && (
+                    <p className={`px-4 py-2 text-xs border-t ${isDarkMode ? 'text-gray-400 border-slate-700' : 'text-gray-500 border-gray-200'}`}>
+                      ● = Currently active model
+                    </p>
+                  )}
                 </div>
-                <TouristParametersBarChart parameters={touristParameterBarData} />
-                <div className="pt-4">
-                  {latestMetric && <PerformanceChart latest={latestMetric} />}
-                </div>
-                {metrics.length > 0 && <MetricsChart metrics={metrics} />}
               </div>
             )}
 
@@ -1639,14 +1691,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                         const acc = selectedAccuracyByModel[id];
                         const label = getModelLabel(id);
                         const hasData = acc !== null;
+                        const activeModel = trainedModels.find((m) => m.inUse);
+                        const activeType = activeModel ? (() => {
+                          const p = activeModel.modelName.toLowerCase();
+                          return p.startsWith('lstm') ? 'lstm'
+                            : p.startsWith('random_forest') ? 'random_forest'
+                            : p.startsWith('prophet') ? 'prophet'
+                            : 'xgboost';
+                        })() : null;
+                        const isActive = id === activeType;
                         return (
                           <div
                             key={id}
-                            className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'}`}
+                            className={`rounded-lg border p-3 ${
+                              isActive
+                                ? isDarkMode ? 'border-green-600 bg-slate-900' : 'border-green-400 bg-white'
+                                : isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'
+                            }`}
                           >
-                            <p className="font-semibold text-sm leading-tight">{label}</p>
-                            <p className={`text-2xl font-bold mt-2 ${hasData ? 'text-sky-500' : isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                              {hasData ? `${((acc ?? 0) * 100).toFixed(1)}%` : '—'}
+                            <div className="flex items-start justify-between gap-1">
+                              <p className="font-semibold text-sm leading-tight">{label}</p>
+                              {isActive && (
+                                <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-semibold ${isDarkMode ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
+                                  Active
+                                </span>
+                              )}
+                            </div>
+                            <p className={`text-2xl font-bold mt-2 ${hasData ? (isActive ? 'text-green-500' : 'text-sky-500') : isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                              {hasData ? `${((acc ?? 0) * 100).toFixed(2)}%` : '—'}
                             </p>
                           </div>
                         );
