@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS model_versions (
   accuracy NUMERIC NOT NULL,
   precision NUMERIC NOT NULL,
   recall NUMERIC NOT NULL,
-  status TEXT NOT NULL
+  status TEXT NOT NULL,
+  trigger_type TEXT NOT NULL DEFAULT 'manual'
 );
 
 CREATE TABLE IF NOT EXISTS data_quality (
@@ -136,5 +137,14 @@ CREATE TABLE IF NOT EXISTS philippine_holiday_counts (
   holiday_count INTEGER NOT NULL,
   source TEXT NOT NULL DEFAULT 'calendarific',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (year, month)
+);
+
+CREATE TABLE IF NOT EXISTS panglao_submission_cache (
+  year INTEGER NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  total_check_ins INTEGER NOT NULL DEFAULT 0,
+  submission_rate_percentage NUMERIC(6,2) NOT NULL DEFAULT 0,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (year, month)
 );

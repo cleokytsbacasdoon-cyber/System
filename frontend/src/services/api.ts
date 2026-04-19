@@ -198,6 +198,7 @@ export interface CheckinsSubmissionData {
   month: number;
   totalCheckIns: number;
   submissionRatePercentage: number;
+  fromCache?: boolean;
 }
 
 export const getCheckinsSubmission = async (year: number, month: number): Promise<CheckinsSubmissionData> => {

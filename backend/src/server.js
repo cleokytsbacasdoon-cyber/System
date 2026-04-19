@@ -676,19 +676,57 @@ const fetchPhilippineHolidayCountFromCalendarific = async (year, month) => {
 };
 
 const fetchPanglaoCheckinsSubmission = async (year, month) => {
-  const response = await axios.get(PANGLAO_CHECKINS_SUBMISSION_API_URL, {
-    params: { year, month },
-    timeout: 10000,
-  });
+  try {
+    const response = await axios.get(PANGLAO_CHECKINS_SUBMISSION_API_URL, {
+      params: { year, month },
+      timeout: 10000,
+    });
 
-  const payload = response.data?.data || {};
+    const payload = response.data?.data || {};
+    const result = {
+      year: Number(payload.year ?? year),
+      month: Number(payload.month ?? month),
+      totalCheckIns: Number(payload.total_check_ins ?? 0),
+      submissionRatePercentage: Number(payload.submission_rate_percentage ?? 0),
+    };
 
-  return {
-    year: Number(payload.year ?? year),
-    month: Number(payload.month ?? month),
-    totalCheckIns: Number(payload.total_check_ins ?? 0),
-    submissionRatePercentage: Number(payload.submission_rate_percentage ?? 0),
-  };
+    // Persist to DB cache so we can serve it when the external API is unreachable
+    query(
+      `INSERT INTO panglao_submission_cache (year, month, total_check_ins, submission_rate_percentage, fetched_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (year, month) DO UPDATE
+         SET total_check_ins = EXCLUDED.total_check_ins,
+             submission_rate_percentage = EXCLUDED.submission_rate_percentage,
+             fetched_at = NOW()`,
+      [result.year, result.month, result.totalCheckIns, result.submissionRatePercentage]
+    ).catch((e) => console.warn('[PanglaoCache] Failed to save to DB cache:', e.message));
+
+    return result;
+  } catch (err) {
+    // External API unreachable — try DB cache
+    console.warn(`[PanglaoCache] External API failed for ${year}-${month}: ${err.message}. Trying DB cache.`);
+    try {
+      const cached = await query(
+        'SELECT * FROM panglao_submission_cache WHERE year = $1 AND month = $2',
+        [year, month]
+      );
+      if (cached.rowCount > 0) {
+        const row = cached.rows[0];
+        console.log(`[PanglaoCache] Serving DB-cached value for ${year}-${month} (fetched ${row.fetched_at})`);
+        return {
+          year: Number(row.year),
+          month: Number(row.month),
+          totalCheckIns: Number(row.total_check_ins),
+          submissionRatePercentage: Number(row.submission_rate_percentage),
+          fromCache: true,
+        };
+      }
+    } catch (dbErr) {
+      console.warn('[PanglaoCache] DB cache lookup failed:', dbErr.message);
+    }
+    // Nothing in cache either — re-throw so the route returns an error
+    throw err;
+  }
 };
 
 app.get('/api/health', async (_req, res) => {
@@ -1050,6 +1088,7 @@ app.get('/api/ml/trained-models', async (_req, res, next) => {
         accuracy: row.accuracy !== null ? Number(row.accuracy) : undefined,
         inUse: row.status === 'active',
         algorithm,
+        triggerType: row.trigger_type || 'manual',
       };
     });
 
@@ -1190,8 +1229,8 @@ app.post('/api/ml/retrain/simulate-monthly', async (req, res, next) => {
 
     const versionId = `mv-${Date.now()}`;
     await query(
-      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
-       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived')`,
+      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status, trigger_type)
+       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived', 'manual')`,
       [versionId, modelVersion, accuracyValue, accuracyValue, accuracyValue]
     );
 
@@ -1235,7 +1274,7 @@ app.post('/api/ml/retrain/simulate-monthly', async (req, res, next) => {
  * Evaluates all 4 models, picks the winner, persists metrics to DB, and returns
  * the winner's forecast series so predictions can be saved.
  */
-async function compareAllModels(year, month, baseModelName) {
+async function compareAllModels(year, month, baseModelName, triggerType = 'manual') {
   const trainingRows = await query(
     `SELECT * FROM monthly_tourism_dataset
      WHERE year < $1 OR (year = $1 AND month <= $2)
@@ -1288,9 +1327,9 @@ async function compareAllModels(year, month, baseModelName) {
 
     const versionId = `mv-cmp-xgb-${Date.now()}`;
     await query(
-      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
-       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived')`,
-      [versionId, xgbModelVersion, accuracyValue, accuracyValue, accuracyValue]
+      `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status, trigger_type)
+       VALUES ($1, $2, NOW(), $3, $4, $5, 'archived', $6)`,
+      [versionId, xgbModelVersion, accuracyValue, accuracyValue, accuracyValue, triggerType]
     );
     await query(
       `INSERT INTO forecast_metrics (id, mape, rmse, mae, r2_score, timestamp)
@@ -1414,9 +1453,9 @@ async function compareAllModels(year, month, baseModelName) {
         await query('DELETE FROM model_versions WHERE version = $1', [m.modelVersion]).catch(() => {});
         versionId = `mv-cmp-${m.id}-${Date.now()}`;
         await query(
-          `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status)
-           VALUES ($1, $2, NOW(), $3, $3, $3, 'archived')`,
-          [versionId, m.modelVersion, accuracy]
+          `INSERT INTO model_versions (id, version, deploy_date, accuracy, precision, recall, status, trigger_type)
+           VALUES ($1, $2, NOW(), $3, $3, $3, 'archived', $4)`,
+          [versionId, m.modelVersion, accuracy, triggerType]
         ).catch(e => { console.error(`[compareAllModels] INSERT ${m.id} error:`, e.message); });
       }
       results[m.id] = { versionId, modelVersion: m.modelVersion, accuracy, mape };
@@ -1489,7 +1528,7 @@ app.post('/api/ml/retrain/compare-all', async (req, res, next) => {
       return res.status(400).json({ error: 'month must be an integer between 1 and 12' });
     }
 
-    const result = await compareAllModels(year, month, baseModelName);
+    const result = await compareAllModels(year, month, baseModelName, 'manual');
 
     if (result.winnerSeries) {
       await savePredictionsFromRetrain(result.winnerSeries, year, month, result.winner).catch((e) =>
@@ -2202,7 +2241,7 @@ cron.schedule('59 23 * * *', async () => {
     }
 
     console.log(`[Auto-Retrain] Starting retrain for ${label} (submission rate: ${submissionRate.toFixed(1)}%).`);
-    const result = await compareAllModels(prevYear, prevMonth, 'xgboost_base');
+    const result = await compareAllModels(prevYear, prevMonth, 'xgboost_base', 'auto');
     if (result.winnerSeries) {
       await savePredictionsFromRetrain(result.winnerSeries, prevYear, prevMonth, result.winner);
     }
@@ -2218,6 +2257,18 @@ cron.schedule('59 23 * * *', async () => {
     console.error(`[Auto-Retrain] Error for ${label}:`, err.message);
   }
 });
+
+// Ensure the submission cache table exists (safe on existing DBs that pre-date init.sql update)
+query(`
+  CREATE TABLE IF NOT EXISTS panglao_submission_cache (
+    year INTEGER NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+    total_check_ins INTEGER NOT NULL DEFAULT 0,
+    submission_rate_percentage NUMERIC(6,2) NOT NULL DEFAULT 0,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (year, month)
+  )
+`).catch((e) => console.warn('[Startup] Could not create panglao_submission_cache:', e.message));
 
 app.listen(PORT, () => {
   console.log(`Backend API running on http://localhost:${PORT}`);

@@ -133,6 +133,7 @@ export interface TrainedModel {
   accuracy?: number;
   inUse: boolean;
   algorithm: string;
+  triggerType?: 'manual' | 'auto';
 }
 
 export interface MonthlyRetrainRequest {

@@ -15,18 +15,16 @@ import {
   getTop10MarketHolidays,
   getTrainedModels,
   getRetrainingJobs,
-  useTrainedModel,
   getCheckinsSubmission,
   CheckinsSubmissionData,
   upsertMonthlyTourismDataset,
   syncTop10MarketHolidaysFromPanglao,
-  getModelCatalog,
   retrainAndCompareAll,
   CompareAllRetrainResult,
 } from '../services/api';
 import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService';
 import { useToast } from '../contexts/ToastContext';
-import { ModelMetrics, DriftAlert, APIEndpoint, DemandForecast, DataQuality, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel, ModelCatalogEntry } from '../types';
+import { ModelMetrics, DriftAlert, APIEndpoint, DemandForecast, DataQuality, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel } from '../types';
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -163,7 +161,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   const [simulateCheckinsSubmission, setSimulateCheckinsSubmission] = useState<CheckinsSubmissionData | null>(null);
   const [simulateCheckinsLoading, setSimulateCheckinsLoading] = useState(false);
   const [trainedModels, setTrainedModels] = useState<TrainedModel[]>([]);
-  const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('xgboost');
   const [dataQuality, setDataQuality] = useState<DataQuality | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,8 +273,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       setTop10MarketHolidayData(top10MarketHolidayDataset);
       setTrainedModels(trainedModelsData);
       setDataQuality(qualityData);
-      // Fetch model catalog separately (non-blocking — may fail in mock mode)
-      getModelCatalog().then(setModelCatalog).catch(() => {});
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to load data', 'error');
     } finally {
@@ -306,6 +301,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [loadData]);
+
+  // Pre-fetch and cache submission rates for all 2026+ months up to today, in the background.
+  // This ensures every past month is available offline even if the user never navigated to it.
+  useEffect(() => {
+    const preCacheAllMonths = async () => {
+      const now = new Date();
+      const endYear = now.getFullYear();
+      const endMonth = now.getMonth() + 1; // 1-indexed
+
+      for (let y = 2026; y <= endYear; y++) {
+        const lastMonth = y === endYear ? endMonth : 12;
+        for (let m = 1; m <= lastMonth; m++) {
+          const dashKey = `ml-dashboard-checkins-${y}-${m}`;
+          const simKey = `ml-simulate-checkins-${y}-${m}`;
+          // Skip if both keys already cached
+          const alreadyCached =
+            localStorage.getItem(dashKey) !== null &&
+            localStorage.getItem(simKey) !== null;
+          if (alreadyCached) continue;
+
+          try {
+            const data = await getCheckinsSubmission(y, m);
+            try { localStorage.setItem(dashKey, JSON.stringify(data)); } catch { /* ignore */ }
+            try { localStorage.setItem(simKey, JSON.stringify(data)); } catch { /* ignore */ }
+          } catch {
+            // Silently skip — backend or Panglao API unreachable for this month
+          }
+        }
+      }
+    };
+
+    preCacheAllMonths();
+  }, []); // Runs once on mount
 
   /**
    * Page-load catch-up: check if the backend auto-retrained this month while
@@ -382,29 +410,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
   };
 
-  const handleUseModel = async (modelId: string) => {
-    try {
-      await useTrainedModel(modelId);
-      addToast('Selected model is now in use', 'success');
-      await loadData();
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to switch active model', 'error');
-    }
-  };
-
-  const handleGeneratePrediction = async (model: TrainedModel) => {
-    try {
-      if (!model.inUse) {
-        await useTrainedModel(model.id);
-      }
-      await loadData();
-      setActiveTab('metrics');
-      addToast(`Prediction generated using ${model.modelName}`, 'success');
-    } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to generate prediction', 'error');
-    }
-  };
-
   const handleDashboardMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = parseInt(e.target.value, 10);
     setSelectedDashboardDate((prev) => {
@@ -422,6 +427,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
   };
 
   const latestMetric = useMemo(() => metrics.length > 0 ? metrics[0] : null, [metrics]);
+
+  const MONTH_NAMES_LONG = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+  // Only show months that have at least one trained model entry
+  const accuracyMonthOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: { year: number; month: number }[] = [];
+    trainedModels.forEach((model) => {
+      const parts = model.modelName.toLowerCase().split('_');
+      const mIdx = parts.findIndex((p) => MONTH_NAMES_LONG.includes(p));
+      if (mIdx === -1) return;
+      const month = MONTH_NAMES_LONG.indexOf(parts[mIdx]) + 1;
+      const year = parseInt(parts[mIdx + 1] ?? '');
+      if (!year) return;
+      const key = `${year}-${month}`;
+      if (!seen.has(key)) { seen.add(key); options.push({ year, month }); }
+    });
+    options.sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+    return options;
+  }, [trainedModels]);
+
+  // Default to the latest available month with data
+  const [accuracyViewYear, setAccuracyViewYear] = useState<number>(() => new Date().getFullYear());
+  const [accuracyViewMonth, setAccuracyViewMonth] = useState<number>(() => new Date().getMonth() + 1);
+
+  // Sync selection to latest option when trainedModels first load
+  useEffect(() => {
+    if (accuracyMonthOptions.length === 0) return;
+    const latest = accuracyMonthOptions[accuracyMonthOptions.length - 1];
+    setAccuracyViewYear(latest.year);
+    setAccuracyViewMonth(latest.month);
+  }, [accuracyMonthOptions.length > 0]);
+
+  const selectedAccuracyByModel = useMemo(() => {
+    const map: Record<string, number | null> = { xgboost: null, lstm: null, random_forest: null, prophet: null };
+    trainedModels.forEach((model) => {
+      const parts = model.modelName.toLowerCase().split('_');
+      const mIdx = parts.findIndex((p) => MONTH_NAMES_LONG.includes(p));
+      if (mIdx === -1) return;
+      const month = MONTH_NAMES_LONG.indexOf(parts[mIdx]) + 1;
+      const year = parseInt(parts[mIdx + 1] ?? '');
+      if (!year || month !== accuracyViewMonth || year !== accuracyViewYear) return;
+      const rawType = parts.slice(0, mIdx).filter((p) => p !== 'base' && p !== 'eval' && p !== 'winner').join('_') || 'xgboost';
+      const type = rawType.startsWith('xgboost') ? 'xgboost'
+        : rawType === 'lstm' ? 'lstm'
+        : rawType.startsWith('random_forest') ? 'random_forest'
+        : rawType === 'prophet' ? 'prophet'
+        : null;
+      if (!type) return;
+      const acc = model.accuracy ?? null;
+      if (acc !== null && (map[type] === null || acc > (map[type] ?? 0))) map[type] = acc;
+    });
+    return map;
+  }, [trainedModels, accuracyViewMonth, accuracyViewYear]);
   const addNotification = useCallback((item: NotificationItem) => {
     setNotifications((prev) => [item, ...prev.filter((existing) => existing.id !== item.id)].slice(0, 20));
   }, []);
@@ -712,18 +771,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
   useEffect(() => {
     // Years ≤ 2025 use the CSV dataset — data is fully available, so submission rate is 100%.
-    // Years ≥ 2026 use the live Panglao ITDMS API.
+    // Years ≥ 2026 use the live Panglao ITDMS API with localStorage cache fallback.
     if (simulateYear <= 2025) {
       setSimulateCheckinsSubmission({ year: simulateYear, month: simulateMonth, totalCheckIns: 0, submissionRatePercentage: 100 });
       setSimulateCheckinsLoading(false);
       return;
     }
+
+    const cacheKey = `ml-simulate-checkins-${simulateYear}-${simulateMonth}`;
+
+    // Load cached value immediately so the UI is never blank
+    let cachedData: CheckinsSubmissionData | null = null;
+    try {
+      cachedData = JSON.parse(localStorage.getItem(cacheKey) ?? 'null') as CheckinsSubmissionData | null;
+    } catch { /* ignore */ }
+    if (cachedData) {
+      setSimulateCheckinsSubmission(cachedData);
+    } else {
+      setSimulateCheckinsSubmission(null);
+    }
+
     let cancelled = false;
     setSimulateCheckinsLoading(true);
-    setSimulateCheckinsSubmission(null);
     getCheckinsSubmission(simulateYear, simulateMonth)
-      .then((data) => { if (!cancelled) setSimulateCheckinsSubmission(data); })
-      .catch(() => { if (!cancelled) setSimulateCheckinsSubmission(null); })
+      .then((data) => {
+        if (cancelled) return;
+        // Persist to cache
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch { /* ignore */ }
+        setSimulateCheckinsSubmission(data);
+      })
+      .catch(() => {
+        // Keep showing cached value on network failure — already set above
+      })
       .finally(() => { if (!cancelled) setSimulateCheckinsLoading(false); });
     return () => { cancelled = true; };
   }, [simulateYear, simulateMonth]);
@@ -736,12 +815,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
     }
 
     const syncFutureMonthFromPanglao = async () => {
+      const monthNumber = dashboardMonth + 1;
+      const dashCacheKey = `ml-dashboard-checkins-${dashboardYear}-${monthNumber}`;
+
+      // Show cached value immediately while fetching
       try {
-        const monthNumber = dashboardMonth + 1;
+        const cached = JSON.parse(localStorage.getItem(dashCacheKey) ?? 'null') as CheckinsSubmissionData | null;
+        if (cached) setFutureCheckinsSubmission(cached);
+      } catch { /* ignore */ }
+
+      try {
         const startedAt = performance.now();
         const data = await getCheckinsSubmission(dashboardYear, monthNumber);
         setPanglaoLatencyMs(Math.round(performance.now() - startedAt));
         setFutureCheckinsSubmission(data);
+        try { localStorage.setItem(dashCacheKey, JSON.stringify(data)); } catch { /* ignore */ }
+        // Keep legacy key in sync too
         try { localStorage.setItem('ml-future-checkins', JSON.stringify(data)); } catch { /* ignore */ }
 
         if (!Number.isFinite(Number(data.totalCheckIns)) || Number(data.totalCheckIns) <= 0) {
@@ -770,7 +859,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
           timestamp: new Date().toISOString(),
         });
       } catch {
-        setFutureCheckinsSubmission(null);
+        // On failure, keep the cached value already set above — just clear the latency indicator
         setPanglaoLatencyMs(null);
       }
     };
@@ -1513,116 +1602,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <div className={`rounded-lg border p-4 md:p-6 ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900'}`}>
                   <h2 className="text-2xl font-bold mb-4">Machine Learning Models</h2>
                   <div className={`rounded-lg border p-4 mb-6 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
                       <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Forecast Model Accuracy</p>
-                      {lastCompareResult && (() => {
-                        const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-                        return (
-                          <p className={`text-xs font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Retrained on data up to {MONTHS[lastCompareResult.training.cutoffMonth - 1]} {lastCompareResult.training.cutoffYear}
-                          </p>
-                        );
-                      })()}
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={accuracyViewMonth}
+                          onChange={(e) => setAccuracyViewMonth(Number(e.target.value))}
+                          className={`text-xs rounded border px-2 py-1 ${isDarkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
+                        >
+                          {accuracyMonthOptions.map(({ year, month }) => (
+                            <option key={`${year}-${month}`} value={month} data-year={year}
+                              style={{ display: year === accuracyViewYear ? 'block' : 'none' }}>
+                              {['January','February','March','April','May','June','July','August','September','October','November','December'][month - 1]}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={accuracyViewYear}
+                          onChange={(e) => {
+                            const newYear = Number(e.target.value);
+                            setAccuracyViewYear(newYear);
+                            const validMonths = accuracyMonthOptions.filter(o => o.year === newYear).map(o => o.month);
+                            if (!validMonths.includes(accuracyViewMonth)) setAccuracyViewMonth(validMonths[validMonths.length - 1] ?? 12);
+                          }}
+                          className={`text-xs rounded border px-2 py-1 ${isDarkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-gray-300 text-gray-700'}`}
+                        >
+                          {Array.from(new Set(accuracyMonthOptions.map(o => o.year))).map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    {lastCompareResult ? (
-                      /* Post-retrain comparison: show all 4 model results */
-                      (() => {
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                      {(['xgboost', 'lstm', 'random_forest', 'prophet'] as const).map((id) => {
+                        const acc = selectedAccuracyByModel[id];
+                        const label = getModelLabel(id);
+                        const hasData = acc !== null;
                         return (
-                          <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                              {(['xgboost', 'lstm', 'random_forest', 'prophet'] as const).map((id) => {
-                                const r = lastCompareResult.results[id];
-                                const isWinner = id === lastCompareResult.winner;
-                                const acc = r?.accuracy != null ? r.accuracy : null;
-                                const hasError = !!r?.error;
-                                const label = getModelLabel(id);
-                                return (
-                                  <div
-                                    key={id}
-                                    className={`rounded-lg border p-3 ${
-                                      isWinner
-                                        ? isDarkMode ? 'border-green-600 bg-slate-900' : 'border-green-400 bg-white'
-                                        : isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'
-                                    }`}
-                                  >
-                                    <div className="flex items-start justify-between gap-1">
-                                      <p className="font-semibold text-sm leading-tight">{label}</p>
-                                      {isWinner && (
-                                        <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-semibold ${isDarkMode ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
-                                          Active
-                                        </span>
-                                      )}
-                                    </div>
-                                    {hasError ? (
-                                      <p className={`text-sm font-semibold mt-2 ${isDarkMode ? 'text-red-400' : 'text-red-500'}`}>Error</p>
-                                    ) : (
-                                      <p className={`text-2xl font-bold mt-2 ${isWinner ? 'text-green-500' : 'text-sky-500'}`}>
-                                        {acc != null ? `${(acc * 100).toFixed(1)}%` : '—'}
-                                      </p>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </>
-                        );
-                      })()
-                    ) : modelCatalog.length === 0 ? (
-                      /* Fallback static cards when catalog not yet loaded */
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                        {[
-                          { id: 'xgboost', name: 'XGBoost' },
-                          { id: 'random_forest', name: 'Random Forest' },
-                          { id: 'prophet', name: 'Prophet' },
-                          { id: 'lstm', name: 'LSTM' },
-                        ].map(m => (
                           <div
-                            key={m.id}
+                            key={id}
                             className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'}`}
                           >
-                            <p className="font-semibold text-sm">{m.name}</p>
-                            <p className={`text-2xl font-bold mt-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>—</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      /* Live catalog cards */
-                      (() => {
-                        const highestAccuracyId = modelCatalog.reduce<string | null>((best, m) => {
-                          const acc = m.performance?.test_accuracy ?? -1;
-                          const bestAcc = modelCatalog.find(x => x.id === best)?.performance?.test_accuracy ?? -1;
-                          return acc > bestAcc ? m.id : best;
-                        }, null);
-                        return (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                            {modelCatalog.map(m => {
-                              const isHighest = m.id === highestAccuracyId;
-                              return (
-                                <div
-                                  key={m.id}
-                                  className={`rounded-lg border p-3 ${isDarkMode ? 'border-slate-600 bg-slate-900' : 'border-gray-200 bg-white'}`}
-                                >
-                                  <div className="flex items-start justify-between gap-1">
-                                    <p className="font-semibold text-sm leading-tight">{m.name}</p>
-                                    {isHighest && (
-                                      <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-full font-semibold ${isDarkMode ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700'}`}>
-                                        Active
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className={`text-2xl font-bold mt-2 ${isHighest ? 'text-green-500' : 'text-sky-500'}`}>
-                                    {m.performance?.test_accuracy != null
-                                      ? `${m.performance.test_accuracy.toFixed(1)}%`
-                                      : '—'}
-                                  </p>
-                                </div>
-                              );
-                            })}
+                            <p className="font-semibold text-sm leading-tight">{label}</p>
+                            <p className={`text-2xl font-bold mt-2 ${hasData ? 'text-sky-500' : isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                              {hasData ? `${((acc ?? 0) * 100).toFixed(1)}%` : '—'}
+                            </p>
                           </div>
                         );
-                      })()
-                    )}
+                      })}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3">
@@ -1735,7 +1764,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                             <div className={`rounded-lg p-3 border ${isDarkMode ? 'bg-slate-700 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
                               <p className={`text-xs ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>Submission Rate</p>
                               <p className="mt-1 font-bold text-sm">
-                                {simulateCheckinsLoading
+                                {simulateCheckinsLoading && !simulateCheckinsSubmission
                                   ? <span className={`${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>Loading…</span>
                                   : simulateCheckinsSubmission
                                     ? `${simulateCheckinsSubmission.submissionRatePercentage.toFixed(2)}%`
@@ -1821,10 +1850,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                       );
                     })()}
 
-                    {/* Trained Models Registry */}
+                    {/* Trained Model Logs */}
                     <div className={`rounded-lg border p-4 flex flex-col ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'}`}>
                       <div className="mb-3 shrink-0">
-                        <h3 className="text-lg font-semibold">Trained Models Registry</h3>
+                        <h3 className="text-lg font-semibold">Trained Model Logs</h3>
                       </div>
                       <div className="overflow-x-auto overflow-y-auto max-h-96">
                         <table className="w-full text-sm">
@@ -1833,8 +1862,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Model Name</th>
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Date Created</th>
                               <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Accuracy</th>
-                              <th className={`sticky top-0 text-left py-2 pr-3 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Status</th>
-                              <th className={`sticky top-0 text-left py-2 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Prediction</th>
+                              <th className={`sticky top-0 text-left py-2 z-10 ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>Trigger</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1843,25 +1871,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                                 <td className="py-2 pr-3 font-medium">{formatModelVersion(model.modelName)}</td>
                                 <td className="py-2 pr-3">{new Date(model.createdAt).toLocaleString()}</td>
                                 <td className="py-2 pr-3">{typeof model.accuracy === 'number' ? `${(model.accuracy * 100).toFixed(2)}%` : '—'}</td>
-                                <td className="py-2 pr-3">
-                                  {model.inUse ? (
-                                    <span className="px-2 py-1 rounded bg-green-600 text-white text-xs font-semibold">Active</span>
-                                  ) : (
-                                    <button
-                                      onClick={() => handleUseModel(model.id)}
-                                      className="px-3 py-1 bg-sky-600 text-white rounded hover:bg-sky-700 text-xs"
-                                    >
-                                      Use
-                                    </button>
-                                  )}
-                                </td>
                                 <td className="py-2">
-                                  <button
-                                    onClick={() => handleGeneratePrediction(model)}
-                                    className="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                                  >
-                                    Generate
-                                  </button>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    model.triggerType === 'auto'
+                                      ? (isDarkMode ? 'bg-blue-900 text-blue-200' : 'bg-blue-100 text-blue-700')
+                                      : (isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600')
+                                  }`}>
+                                    {model.triggerType === 'auto' ? 'Auto' : 'Manual'}
+                                  </span>
                                 </td>
                               </tr>
                             ))}
