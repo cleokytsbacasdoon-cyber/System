@@ -82,39 +82,38 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
     const testActual: Array<number | null> = allKeys.map((k, i) =>
       i >= splitIdx && i < baseKeys.length ? (baseMap.get(k)?.actual ?? null) : null,
     );
-    // Combined actual (blue) — all base period data in one line
-    const actualAll: Array<number | null> = allKeys.map((k, i) =>
-      i < baseKeys.length ? (baseMap.get(k)?.actual ?? null) : null,
-    );
-    // 2026+ actuals as a separate dataset
-    const currentActual: Array<number | null> = allKeys.map((k) => {
+    // Combined actual (blue) — base period + 2026 actuals in one line
+    const actualAll: Array<number | null> = allKeys.map((k, i) => {
+      if (i < baseKeys.length) return baseMap.get(k)?.actual ?? null;
       const v = futureMap.get(k)?.actual ?? 0;
       return v > 0 ? v : null;
     });
-    const hasCurrentActual = currentActual.some((v) => v !== null);
 
     const allPredicted: Array<number | null> = allKeys.map((k) => {
       const v = (baseMap.get(k) ?? futureMap.get(k))?.predicted ?? 0;
       return v > 0 ? v : null;
     });
-    // Orange predicted — only shown over the test set period
-    const testPredicted: Array<number | null> = allKeys.map((k, i) => {
-      if (i < splitIdx || i >= baseKeys.length) return null;
-      const v = baseMap.get(k)?.predicted ?? 0;
-      return v > 0 ? v : null;
+    // Orange predicted — test set period + future years
+    const fullPredicted: Array<number | null> = allKeys.map((k, i) => {
+      if (i >= splitIdx && i < baseKeys.length) {
+        const v = baseMap.get(k)?.predicted ?? 0;
+        return v > 0 ? v : null;
+      }
+      if (i >= baseKeys.length) {
+        const v = futureMap.get(k)?.predicted ?? 0;
+        return v > 0 ? v : null;
+      }
+      return null;
     });
-    const hasTestPredicted = testPredicted.some((v) => v !== null);
+    const hasFullPredicted = fullPredicted.some((v) => v !== null);
     const hasPredicted = allPredicted.some((v) => v !== null);
 
     return {
       allLabels,
       trainActual,
-      testActual,
       actualAll,
-      currentActual,
-      hasCurrentActual,
-      testPredicted,
-      hasTestPredicted,
+      fullPredicted,
+      hasFullPredicted,
       allPredicted,
       hasPredicted,
       splitIdx,
@@ -211,39 +210,13 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
             pointRadius: 2,
             pointHoverRadius: 5,
             tension: 0.35,
-            spanGaps: false,
+            spanGaps: true,
           },
-          {
-            label: 'Actual – Test (20%)',
-            data: allYearsData.testActual,
-            borderColor: '#2563EB',
-            backgroundColor: 'rgba(37, 99, 235, 0.15)',
-            fill: true,
-            pointRadius: 2,
-            pointHoverRadius: 5,
-            tension: 0.35,
-            spanGaps: false,
-          },
-          ...(allYearsData.hasCurrentActual
+          ...(allYearsData.hasFullPredicted
             ? [
                 {
-                  label: 'Actual – 2026',
-                  data: allYearsData.currentActual,
-                  borderColor: '#16A34A',
-                  backgroundColor: 'rgba(22, 163, 74, 0.12)',
-                  fill: true,
-                  pointRadius: 4,
-                  pointHoverRadius: 6,
-                  tension: 0.35,
-                  spanGaps: false,
-                },
-              ]
-            : []),
-          ...(allYearsData.hasTestPredicted
-            ? [
-                {
-                  label: 'Model Predicted (Test Set)',
-                  data: allYearsData.testPredicted,
+                  label: 'Predicted Tourist',
+                  data: allYearsData.fullPredicted,
                   borderColor: '#F97316',
                   backgroundColor: 'transparent',
                   borderDash: [5, 4],
@@ -313,36 +286,6 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
             Monthly Tourist Arrivals Data
           </p>
           {yearSelectorEl}
-        </div>
-
-        {/* 80 / 20 split info banner */}
-        <div className={`flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-blue-600" />
-            <strong className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Actual</strong>
-            &nbsp;Jan 2016 – Dec 2025
-          </span>
-          <span className={isDarkMode ? 'text-slate-600' : 'text-gray-300'}>|</span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-6 h-0.5 bg-orange-500" style={{borderTop:'2px dashed #F97316',display:'inline-block'}} />
-            <strong className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>Predicted (test set)</strong>
-            &nbsp;{allYearsData?.boundaryLabel ?? '…'} – Dec 2025
-          </span>
-          {allYearsData?.hasCurrentActual && (
-            <>
-              <span className={isDarkMode ? 'text-slate-600' : 'text-gray-300'}>|</span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 rounded-sm bg-green-600" />
-                <strong className={isDarkMode ? 'text-gray-200' : 'text-gray-700'}>2026 Actual</strong>
-              </span>
-            </>
-          )}
-          {allYearsData && (
-            <>
-              <span className={isDarkMode ? 'text-slate-600' : 'text-gray-300'}>|</span>
-              <span>{allYearsData.splitIdx} train / {allYearsData.totalBaseMonths - allYearsData.splitIdx} test months</span>
-            </>
-          )}
         </div>
 
         <div className="h-80 md:h-96">
