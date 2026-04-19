@@ -1,454 +1,284 @@
-# Setup Guide - ML Monitoring System (Frontend Only)
+﻿# Setup Guide — Panglao Tourist Accommodation Demand Forecasting System
 
-This guide will help you set up and run the ML Monitoring System dashboard. The frontend includes a mock API service, so you can start using it immediately without backend infrastructure.
+This guide covers full installation of the system: PostgreSQL (Docker), Backend API (Node.js), and Frontend (React + Vite).
 
 ---
 
-## 📋 Prerequisites
+## System Requirements
 
-### System Requirements
 | Component | Requirement |
 |-----------|-------------|
 | OS | Windows, macOS, or Linux |
-| Node.js | 16 or higher |
-| npm | 8 or higher (comes with Node.js) |
-| RAM | 2GB minimum (4GB recommended) |
-| Disk Space | 500MB |
-
-### Installation
-
-1. **Install Node.js**
-   - Download from: https://nodejs.org/
-   - Download the LTS (Long Term Support) version
-   - Installation will include npm automatically
-
-2. **Verify Installation**
-   ```bash
-   node --version    # Should show v16.0.0 or higher
-   npm --version     # Should show 8.0.0 or higher
-   ```
+| Node.js | 18 or higher |
+| npm | 9 or higher (comes with Node.js) |
+| Docker Desktop | Latest stable |
+| RAM | 4GB minimum |
+| Disk Space | 1GB |
 
 ---
 
-## 🚀 Quick Start (5 minutes)
-
-### Option A: Command Line
+## Step 1: Verify Prerequisites
 
 ```bash
-# Navigate to frontend folder
-cd frontend
+node --version    # v18.0.0 or higher
+npm --version     # 9.0.0 or higher
+docker --version  # Docker Desktop must be running
+```
 
-# Install dependencies (only once)
+---
+
+## Step 2: Install Dependencies
+
+```bash
+# Backend
+cd backend
 npm install
 
-# Start development server
-npm run dev
-```
-
-**Open your browser to:** http://localhost:5173
-
-You'll see the dashboard with sample data immediately!
-
-### Option B: Using an IDE
-
-If using VS Code:
-
-1. Open the project folder: `File` → `Open Folder` → select `system thesis`
-2. Open terminal: `Ctrl + ```
-3. Run commands:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-4. Click the link in terminal (http://localhost:5173)
-
----
-
-## 🎯 Folder Structure
-
-```
-system thesis/
-└── frontend/                  # React + TypeScript dashboard
-    ├── src/
-    │   ├── components/       # React components (MetricsCard, Charts, etc.)
-    │   ├── pages/           # Dashboard and Settings pages
-    │   ├── services/        # api.ts (routes to Mock API) + mockApi.ts
-    │   ├── contexts/        # Toast and Dark Mode providers
-    │   ├── types/           # TypeScript interfaces
-    │   ├── hooks/           # Custom hooks
-    │   ├── utils/           # Utility functions
-    │   ├── App.tsx
-    │   └── main.tsx
-    ├── public/
-    ├── index.html
-    ├── vite.config.ts       # Vite configuration
-    ├── tailwind.config.js    # Tailwind CSS configuration
-    ├── vitest.config.ts      # Test configuration
-    ├── package.json
-    └── package-lock.json
-```
-
----
-
-## 💻 Installation Steps
-
-### Step 1: Extract Project Files
-
-1. Extract the project archive if you haven't already
-2. Navigate to the project folder:
-   ```bash
-   cd "system thesis"
-   ```
-   (Adjust path if on macOS/Linux or if extracted elsewhere)
-
-### Step 2: Install Dependencies
-
-Dependencies are Node.js packages the project needs to run.
-
-```bash
+# Frontend (separate terminal)
 cd frontend
 npm install
 ```
 
-This will:
-- Download ~300 packages
-- Create a `node_modules/` folder
-- Take 2-3 minutes on first run
+---
 
-**Expected Output:**
-```
-added XXX packages in XX seconds
-```
+## Step 3: Start the System
 
-### Step 3: Start Development Server
+### Option A — One Command (Recommended)
 
 ```bash
+docker compose up -d --build
+```
+
+Starts PostgreSQL, Backend API, and Frontend all at once.
+
+### Option B — Manual
+
+**Terminal 1:**
+```bash
+cd backend
+npm run db:up
+npm run db:init
 npm run dev
 ```
 
-**Expected Output:**
+**Terminal 2:**
+```bash
+cd frontend
+npm run dev
 ```
-VITE v5.0.0  ready in 234 ms
 
-➜  Local:   http://localhost:5173/
+---
+
+## Step 4: Verify Everything is Running
+
+| Service | URL | Expected Response |
+|---------|-----|-------------------|
+| PostgreSQL | `localhost:5432` | Port open |
+| Backend API | `http://localhost:3000/api/health` | `{"status":"ok"}` |
+| Frontend | `http://localhost:5173` | Dashboard loads |
+
+```powershell
+# Windows: check PostgreSQL port
+Test-NetConnection localhost -Port 5432
 ```
 
-### Step 4: Open in Browser
+---
 
-Click the link or navigate to: **http://localhost:5173**
+## Environment Variables
 
-You should see the ML Monitoring Dashboard! ✅
+### Backend (`backend/.env`)
+
+```env
+PORT=3000
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ml_monitoring
+DB_USER=postgres
+DB_PASSWORD=postgres
+```
+
+### Frontend (`frontend/.env`)
+
+```env
+VITE_USE_MOCK_API=false
+VITE_API_BASE_URL=http://localhost:3000/api
+```
 
 ---
 
-## 📊 First Time Using the Dashboard
+## Project Structure
 
-### What You'll See
-
-1. **Header** with theme toggle (light/dark mode)
-2. **6 Navigation Tabs**:
-   - 📊 Overview - Quick statistics
-   - 📈 Metrics - Charts and trends
-   - ⚠️ Alerts - Drift detection
-   - 🔄 Retraining - Job tracking
-   - 🔗 API - Endpoint monitoring
-   - 📥 Export - Data export
-
-3. **Sample Data** - All mock data auto-refreshing every 30 seconds
-
-### Try These Actions
-
-- 🌙 Toggle dark mode (top-right button)
-- 📊 View metrics charts
-- ⚠️ Resolve a drift alert by clicking the X button
-- 🔄 Start a retraining job
-- ⚙️ Open Settings (gear icon) to configure options
-- 📥 Export data as CSV or JSON
-
----
-
-## ⚙️ Configuration
-
-### Dashboard Settings
-
-Access via the Settings page (gear icon in header):
-
-#### Drift Detection Settings
-- **Drift Threshold**: How sensitive alerts are (1-50%)
-- **Auto-resolve Old Alerts**: Automatically close alerts after time
-- **Alert Sounds**: Enable audio notifications
-
-#### Refresh Interval
-- **Dashboard Refresh**: How often data updates (10-300 seconds)
-
-#### Data Management
-- **Keep Metrics**: How many historical records to store (100-5000)
-
-**Settings are saved automatically to browser storage.**
-
-### Environment Configuration
-
-By default, the frontend uses mock API data. To use a real backend later:
-
-1. Open `frontend/src/services/api.ts`
-2. Find this line:
-   ```typescript
-   const USE_MOCK_API = true;
-   ```
-3. Change to:
-   ```typescript
-   const USE_MOCK_API = false;
-   ```
-4. Ensure backend API is running on `http://localhost:3000/api`
-5. Restart dev server
+```
+System-Thesis/
+├── backend/
+│   ├── src/
+│   │   ├── server.js              # Express API, ML pipeline, cron scheduler
+│   │   └── ml/
+│   │       └── tourismModelService.js  # XGBoost, LSTM, RF, Prophet forecast builders
+│   ├── models/
+│   │   ├── tourism_xgb_model.json  # Seed XGBoost model (tracked in git)
+│   │   ├── tourism_model_metadata.json  # Seed model metadata (tracked in git)
+│   │   └── *.json                 # Retrained models (git-ignored, stored locally)
+│   ├── db/
+│   │   ├── init.sql               # DB schema + seed data
+│   │   ├── 2016 - 2025 datasets.csv  # Historical tourism data
+│   │   └── Top10MH.csv            # Top 10 market holiday data
+│   ├── Dockerfile
+│   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── pages/Dashboard.tsx    # 4-tab main interface
+│   │   ├── components/            # Charts, tables, cards
+│   │   ├── services/api.ts        # API layer
+│   │   ├── contexts/              # DarkMode, Toast providers
+│   │   └── types/index.ts         # TypeScript interfaces
+│   └── package.json
+├── docker-compose.yml
+├── README.md
+├── SETUP.md
+└── QUICKSTART.md
+```
 
 ---
 
-## 🧪 Running Tests
+## Dashboard Tabs
 
-The project includes unit tests to verify everything works:
+| Tab | Description |
+|-----|-------------|
+| **Dashboard** | Next-month forecast, tourist trend chart, weather/holiday/inflation parameters |
+| **Metrics** | Monthly tourist arrivals chart (2016–present), Forecasting Model Performance table |
+| **Model Parameters** | Submit monthly data, trigger retraining, Trained Model Logs, API Status |
+| **About** | System documentation, retraining feature explanation, external data sources |
+
+---
+
+## Database Schema (Key Tables)
+
+| Table | Purpose |
+|-------|---------|
+| `monthly_tourism_dataset` | Historical + current tourist arrival data with features |
+| `model_versions` | All trained model records with accuracy and status |
+| `saved_predictions` | Per-model monthly predictions from retraining |
+| `retraining_jobs` | Retraining run history |
+| `demand_alerts` | Drift/anomaly alerts |
+
+---
+
+## How to View the Database
+
+### DBeaver / pgAdmin
+
+- Host: `localhost`, Port: `5432`
+- Database: `ml_monitoring`
+- Username: `postgres`, Password: `postgres`
+
+### psql in container
 
 ```bash
-# Run all tests
-npm test
+docker exec -it ml-monitoring-postgres psql -U postgres -d ml_monitoring
+```
 
-# Run tests in visual mode
-npm run test:ui
-
-# Generate coverage report
-npm run test:coverage
+Useful queries:
+```sql
+\dt
+SELECT COUNT(*) FROM monthly_tourism_dataset;
+SELECT * FROM model_versions ORDER BY created_at DESC LIMIT 10;
+SELECT * FROM saved_predictions ORDER BY predicted_year, predicted_month;
+\q
 ```
 
 ---
 
-## 🔧 Development Commands
+## Development Commands
 
-Inside the `frontend/` folder:
+### Backend
 
-| Command | Purpose |
-|---------|---------|
-| `npm run dev` | Start dev server (hot reload) |
-| `npm run build` | Build for production |
-| `npm run preview` | Preview production build locally |
-| `npm test` | Run unit tests |
-| `npm run lint` | Check code quality |
-| `npm run type-check` | Verify TypeScript types |
+```bash
+npm run db:up      # Start PostgreSQL container
+npm run db:down    # Stop PostgreSQL container
+npm run db:init    # Create/seed all tables
+npm run dev        # Start API server with hot reload
+npm start          # Start API server (no watch)
+```
+
+### Frontend
+
+```bash
+npm run dev        # Start development server
+npm run build      # Build for production
+npm run preview    # Preview production build
+npm test           # Run unit tests
+npm run type-check # TypeScript type check
+npm run lint       # Lint check
+```
 
 ---
 
-## 🆘 Troubleshooting
+## Troubleshooting
 
-### Issue: npm command not found
-**Solution:** 
-- Install Node.js from https://nodejs.org/
-- Restart your terminal/PowerShell
-- Verify with: `npm --version`
+### `Connection refused` on port 5432
+```bash
+cd backend
+npm run db:up
+npm run db:init
+```
 
-### Issue: Dashboard shows "Loading..." forever
-**Possible Causes:**
-1. Dev server crashed
-   - Check terminal for errors
-   - Restart with `npm run dev`
+### `dockerDesktopLinuxEngine` error
+Open Docker Desktop and wait until the engine fully starts.
 
-2. Port issue
-   - Another app might be using port 5173
-   - Try: `npm run dev -- --port 5174`
+### Frontend loads but no data
+1. Confirm backend is running (`http://localhost:3000/api/health`)
+2. Check `frontend/.env` has `VITE_USE_MOCK_API=false`
+3. Re-run `npm run db:init`
 
-3. Browser cache
-   - Clear cache: `Ctrl + Shift + Delete` (Chrome/Edge)
-   - Or open in new Incognito window
+### No model / forecast errors
+Ensure `backend/models/tourism_xgb_model.json` exists. This seed model is tracked in git. If missing, restore via:
+```bash
+git checkout HEAD -- backend/models/tourism_xgb_model.json
+git checkout HEAD -- backend/models/tourism_model_metadata.json
+```
 
-### Issue: npm install fails
-**Solution:**
+### npm install fails
 ```bash
 npm cache clean --force
-rm -rf node_modules package-lock.json
+rd /s /q node_modules
 npm install
 ```
 
-### Issue: Module errors in console
-**Solution:**
-1. Stop dev server (Ctrl + C in terminal)
-2. Run:
-   ```bash
-   npm install
-   npm run dev
-   ```
+---
 
-### Issue: Port 5173 already in use
-**Solution:**
+## Full Recovery Sequence
+
 ```bash
-# Use different port
-npm run dev -- --port 5174
-
-# Or find and stop process using 5173
-# Windows PowerShell:
-Get-Process | Where-Object { $_.ProcessName -contains "*node*" }
+cd backend
+npm run db:down
+npm run db:up
+npm run db:init
+npm run dev
 ```
 
-### Issue: Styles not loading (no Tailwind CSS)
-**Solution:**
-1. Clear browser cache
-2. Clear node_modules:
-   ```bash
-   rm -rf node_modules
-   npm install
-   npm run dev
-   ```
-
----
-
-## 🌐 Accessing the Dashboard
-
-Once running, access via:
-
-- **Local (same machine)**: http://localhost:5173
-- **Network (other machines)**: http://YOUR_IP:5173
-  - Find YOUR_IP in terminal output or use: `ipconfig` (Windows) / `ifconfig` (Mac/Linux)
-
----
-
-## 📝 Typical Workflow
-
-### Day 1 - Installation
+Then in a second terminal:
 ```bash
 cd frontend
-npm install          # Takes 2-3 minutes, one-time only
-npm run dev          # Starts development server
-# Keep this terminal open while developing
-```
-
-### Day 2+ - Development
-```bash
-cd frontend
-npm run dev          # Code changes auto-reload
-```
-
-### Building for Production
-```bash
-cd frontend
-npm run build        # Creates optimized build
-npm run preview      # Preview the built version
+npm run dev
 ```
 
 ---
 
-## 🚀 Next Steps
+## Architecture
 
-### Explore the Dashboard
-1. Look at different tabs
-2. Open Developer Tools (F12) to understand structure
-3. Try Settings to customize behavior
-4. Test data export feature
-
-### Add Your Own Data (Later)
-When accessing a real backend:
-1. Set `USE_MOCK_API = false` in `src/services/api.ts`
-2. Create Express.js backend on port 3000
-3. Implement the API endpoints (documented in FEATURES.md)
-4. Restart dev server
-
-### Understand the Code
-- **Components**: Located in `src/components/`
-- **Pages**: Located in `src/pages/`
-- **API Integration**: Located in `src/services/`
-- **Type Definitions**: Located in `src/types/`
-- **Styling**: Tailwind CSS classes in components + `index.css`
-
----
-
-## 📚 Additional Resources
-
-- **Frontend Features**: See [frontend/FEATURES.md](./frontend/FEATURES.md) (50+ pages of component details)
-- **Performance Tips**: See [frontend/PERFORMANCE.md](./frontend/PERFORMANCE.md)
-- **Enhancements Made**: See [docs/archive/frontend/ENHANCEMENTS.md](./docs/archive/frontend/ENHANCEMENTS.md)
-- **Main README**: See [README.md](./README.md)
-
----
-
-## ✅ Verification Checklist
-
-After setup, you should be able to:
-
-- [ ] Run `npm run dev` without errors
-- [ ] Open http://localhost:5173 in browser
-- [ ] See the dashboard with sample data
-- [ ] Click between tabs without errors
-- [ ] Toggle dark mode (top-right button)
-- [ ] Open Settings and see options
-- [ ] Resolve a drift alert
-- [ ] Start a retraining job
-- [ ] Export data as CSV
-
-If any of these fail, check the Troubleshooting section above.
-
----
-
-## 🎓 System Architecture
-
-### Current State (Frontend Only)
 ```
 Browser
-   ↓
-Frontend (React, TypeScript)
-   ↓
-Mock API Service (mockApi.ts)
-   ↓
-Sample Data (in-memory)
+  ↓
+Frontend (React + TypeScript + Vite)
+  ↓  api.ts (VITE_USE_MOCK_API=false)
+Backend (Express.js, Node.js)
+  ↓               ↓
+PostgreSQL     Python ML scripts
+(ml_monitoring)  (XGBoost, LSTM, RF, Prophet)
 ```
 
-No backend, database, or external services needed!
-
-### Future State (With Backend)
-```
-Browser
-   ↓
-Frontend (React, TypeScript)
-   ↓
-Real API Layer (api.ts - USE_MOCK_API = false)
-   ↓
-Backend (Express.js)
-   ↓
-PostgreSQL Database
-```
-
-Simply change one flag and connect to real backend when ready!
-
----
-
-## 💡 Tips & Tricks
-
-1. **Hot Reload**: Changes to code automatically reflect in browser (no refresh needed)
-
-2. **Dark Mode**: Preference saved to browser storage, persists between sessions
-
-3. **Settings**: All dashboard settings stored in browser, can be reset anytime
-
-4. **Data Persistence**: Mock data resets when you refresh (by design), real backend will persist
-
-5. **Console Access**: Open Developer Tools (F12) → Console to see debug logs
-
-6. **Network Tab**: F12 → Network to see mock API calls with realistic delays
-
----
-
-## 🔒 Data Privacy
-
-- All data in mock mode stays in your browser
-- Nothing is sent to external servers
-- Browser storage can be cleared anytime
-- No authentication needed for development
-
----
-
-## 📞 Getting Help
-
-1. Check [QUICKSTART.md](./QUICKSTART.md) for common questions
-2. Review error messages in browser console (F12)
-3. Check terminal where dev server is running
-4. Review source code comments in `src/`
-
----
-
-**You're all set! Dashboard should be running at http://localhost:5173 🎉**
+External data sources fetched at runtime:
+- Open-Meteo API — weather (temperature, precipitation)
+- Calendarific API — Philippine + top market holidays
+- Inflation rate — stored in monthly_tourism_dataset

@@ -1,110 +1,133 @@
-# Quick Start Guide - 5 Minute Setup
+# Quick Start Guide — 5 Minute Setup
 
-This guide gets you running with the ML Monitoring Dashboard **without any backend setup** using mock data.
+Get the full system running: PostgreSQL + Backend API + Frontend dashboard.
 
-## 🚀 TL;DR - Get Running in 5 Minutes
+## Prerequisites
 
-### Prerequisites
-- Node.js 16+ ([Download](https://nodejs.org/))
+- [Node.js 18+](https://nodejs.org/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be running)
 
-That's it! No PostgreSQL, no backend server, nothing else needed.
+## Option A: One Command (Recommended)
 
-### 1. Install & Run
+From the project root:
 
+```bash
+docker compose up -d --build
+```
+
+This starts everything at once:
+- PostgreSQL on `localhost:5432`
+- Backend API on `localhost:3000`
+- Frontend on `localhost:5173`
+
+Open **http://localhost:5173** — the dashboard loads with live data.
+
+To stop:
+```bash
+docker compose down
+```
+
+---
+
+## Option B: Manual (Step by Step)
+
+**Terminal 1 — Database + Backend:**
+```bash
+cd backend
+npm install
+npm run db:up
+npm run db:init
+npm run dev
+```
+
+**Terminal 2 — Frontend:**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 2. Open Dashboard
-
-**Click the link or go to**: http://localhost:5173
-
-You'll see the complete ML Monitoring Dashboard with sample data! ✅
+Open **http://localhost:5173**
 
 ---
 
-## 📊 What You'll See
+## What You'll See
 
-The dashboard shows real-time ML model monitoring with **sample data**:
-
-1. **Overview Tab** - Quick statistics and key metrics
-2. **Metrics Tab** - Charts showing accuracy trends
-3. **Alerts Tab** - Drift detection alerts (you can resolve them)
-4. **Retraining Tab** - Auto-retraining job tracking
-5. **API Tab** - API endpoint health monitoring
-6. **Export Tab** - Export data as CSV or JSON
-
-## 🎯 Try These Features
-
-### 1. Dark Mode
-- Click the moon icon (top-right)
-- Your preference is saved automatically
-
-### 2. Resolve an Alert
-- Go to **Alerts** tab
-- Click the X button on a drift alert
-- It disappears immediately
-
-### 3. Start a Retraining Job
-- Go to **Retraining** tab
-- Click "Start New Job"
-- Watch the job status change: pending → running → completed
-
-### 4. View Charts
-- Go to **Metrics** tab
-- See interactive charts of model performance
-- Charts update automatically every 30 seconds
-
-### 5. Export Data
-- Go to **Export** tab
-- Download metrics as CSV or JSON
-- All your sample data in useful formats
-
-### 6. Change Settings
-- Click the gear icon (top-right)
-- Adjust drift thresholds, refresh rates, etc.
-- Settings save automatically
+| Tab | What it shows |
+|-----|---------------|
+| **Dashboard** | Next-month tourist arrival forecast, monthly trend chart, weather/holiday/inflation parameters |
+| **Metrics** | Historical vs. predicted charts (2016–present), Forecasting Model Performance table per model per month |
+| **Model Parameters** | Submit monthly arrival data, retrain ML models, Trained Model Logs, API Status |
+| **About** | System documentation and feature explanations |
 
 ---
 
-## 📝 Sample Data Features
+## Try These Features
 
-The mock API generates and updates:
+### Dark Mode
+Click the moon/sun icon in the header. Your preference is saved automatically.
 
-- **10 Historical Metrics** - Accuracy, precision, recall trends
-- **2 Drift Alerts** - Some active, some resolved
-- **3 Retraining Jobs** - Different statuses (pending, running, completed)
-- **3 API Endpoints** - Some active, some inactive
-- **Real-time Updates** - New metrics added every 30 seconds
-- **Network Simulation** - Realistic 200-1000ms API delays
+### Submit Monthly Data
+1. Go to **Model Parameters** tab
+2. Fill in monthly tourist arrivals, weather, and economic data
+3. Click **Submit Data**
 
-Everything updates automatically. Watch it change in real-time!
+### Retrain Models
+1. Go to **Model Parameters** tab
+2. Select the month and year with actual data
+3. Click **Retrain Models**
+4. All four models (XGBoost, LSTM, Random Forest, Prophet) are trained and compared
+5. The highest-accuracy model is activated automatically
 
----
-
-## 🔄 Real-time Updates
-
-The dashboard auto-refreshes every 30 seconds with new sample data:
-
-- New metrics are generated
-- Job statuses advance (pending → running → completed)
-- Drift alert patterns change
-- All updates are realistic and simulated
-
-No backend server needed!
+### View Forecast Performance
+1. Go to **Metrics** tab
+2. Scroll to **Forecasting Model Performance** table
+3. See accuracy for each model across all recorded months
 
 ---
 
-## 📚 Full Documentation
+## Verification Checklist
 
-For more details, see:
+- [ ] Terminal shows no errors after startup
+- [ ] `http://localhost:3000/api/health` returns `{"status":"ok"}`
+- [ ] `http://localhost:5173` loads the dashboard
+- [ ] Tourist arrival charts show data
+- [ ] Model Parameters tab shows trained model entries
 
-- **[Complete Setup Guide](./SETUP.md)** - Detailed installation and troubleshooting
-- **[Frontend Features](./frontend/FEATURES.md)** - All components (50+ pages)
-- **[Performance Tips](./frontend/PERFORMANCE.md)** - Optimization details
-- **[Main README](./README.md)** - Architecture overview
+---
+
+## Troubleshooting
+
+**Docker not running:**
+Open Docker Desktop and wait until the engine fully starts.
+
+**Port 5432 refused:**
+```bash
+cd backend
+npm run db:up
+npm run db:init
+```
+
+**Frontend shows no data:**
+Check `frontend/.env` — it should have:
+```env
+VITE_USE_MOCK_API=false
+VITE_API_BASE_URL=http://localhost:3000/api
+```
+
+**Full reset:**
+```bash
+cd backend
+npm run db:down
+npm run db:up
+npm run db:init
+npm run dev
+```
+
+---
+
+For more detail, see [SETUP.md](./SETUP.md).
+
 
 ---
 

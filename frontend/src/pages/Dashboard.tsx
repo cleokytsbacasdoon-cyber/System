@@ -2004,31 +2004,136 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
 
             {/* About the System Tab */}
             {activeTab === 'about' && (
-              <div className={`space-y-6 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+              <div className={`space-y-8 rounded-lg p-6 ${isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white border'}`}>
+
+                {/* Header */}
                 <div>
                   <h3 className="text-2xl font-bold mb-3">Panglao Tourist Accommodation Demand Forecasting System</h3>
                   <p className={`${isDarkMode ? 'text-gray-200' : 'text-gray-700'} leading-relaxed`}>
-                    This system helps forecast the future demand for tourist accommodations in Panglao, Bohol by analyzing tourism data and external factors such as Philippine holidays, average high temperature, average low temperature, average precipitation, inflation rate, and top 10 market holidays. It supports local tourism stakeholders in making informed decisions for planning and resource management.
+                    This system is an intelligent, data-driven platform designed to forecast future tourist accommodation demand in Panglao, Bohol. It integrates historical tourism arrival data with real-time external factors — including weather conditions, inflation rates, and holiday calendars — to generate monthly predictions using multiple machine learning models. The system is built to continuously improve over time through automated model retraining, giving local tourism stakeholders a reliable tool for strategic planning, resource allocation, and operational decision-making.
                   </p>
                 </div>
 
+                {/* Key Feature Cards */}
                 <div>
-                  <h4 className="text-xl font-semibold mb-3">System Overview</h4>
+                  <h4 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Key Features</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
-                      <p className="font-semibold mb-2">Forecasting and Monitoring</p>
-                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm`}>
-                        Tracks demand forecasting metrics, drift alerts, and retraining activities to keep model performance reliable.
+                    <div className={`rounded-lg p-5 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className={`font-semibold text-base mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Demand Forecasting</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm leading-relaxed`}>
+                        Generates monthly tourist arrival forecasts for up to 12 months ahead using the best-performing trained model. Predictions are displayed alongside historical actuals so you can visually assess accuracy at a glance.
                       </p>
                     </div>
-                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
-                      <p className="font-semibold mb-2">Decision Support</p>
-                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm`}>
-                        Provides actionable insights for accommodation planning, staffing, and resource allocation across peak and off-peak periods.
+                    <div className={`rounded-lg p-5 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className={`font-semibold text-base mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Multi-Model Comparison</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm leading-relaxed`}>
+                        Trains and evaluates four machine learning models every month — XGBoost, LSTM, Random Forest, and Prophet — then automatically activates the highest-accuracy model as the active forecaster.
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-5 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className={`font-semibold text-base mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Performance Monitoring</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm leading-relaxed`}>
+                        Tracks model accuracy over time in the Metrics tab. The Forecasting Model Performance table shows each model's accuracy for every recorded month, making it easy to spot improvements or degradations across retraining cycles.
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-5 border ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                      <p className={`font-semibold text-base mb-2 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Decision Support</p>
+                      <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} text-sm leading-relaxed`}>
+                        Equips tourism administrators and accommodation operators with forward-looking data to optimize staffing, pricing, and resource allocation for both peak and off-peak seasons.
                       </p>
                     </div>
                   </div>
                 </div>
+
+                {/* Retraining Model Feature */}
+                <div className={`rounded-lg border-l-4 border-blue-500 p-5 ${isDarkMode ? 'bg-slate-900 border border-slate-700' : 'bg-blue-50 border border-blue-100'}`}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <svg className="h-6 w-6 text-blue-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <h4 className={`text-xl font-semibold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Retraining Model Feature</h4>
+                  </div>
+                  <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'} text-sm leading-relaxed mb-4`}>
+                    The system automatically retrains all four forecasting models each month using the latest available tourist arrival data. This ensures that predictions remain accurate as new real-world patterns emerge over time. The retraining process works as follows:
+                  </p>
+                  <ol className={`list-decimal list-inside space-y-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'} mb-4`}>
+                    <li>At the end of each month, the system checks whether new tourist arrival data has been submitted for that month.</li>
+                    <li>If actual data exists, all four models — XGBoost, LSTM, Random Forest, and Prophet — are retrained using the full updated dataset.</li>
+                    <li>After training, the model with the highest accuracy is automatically activated as the live forecasting model.</li>
+                    <li>If no data exists for the target month, retraining is cancelled and an error is shown to prevent training on empty records.</li>
+                  </ol>
+                  <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'} text-sm leading-relaxed mb-4`}>
+                    You can also manually trigger retraining at any time using the <strong>Retrain Models</strong> button in the <strong>Model Parameters</strong> tab. Manual retraining follows the same data validation — it will only proceed if actual arrival data exists for the selected month and year.
+                  </p>
+                  <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${isDarkMode ? 'bg-blue-900/40 text-blue-300 border border-blue-700' : 'bg-blue-100 text-blue-800 border border-blue-300'}`}>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    To retrain manually, go to the <strong className="mx-1">Model Parameters</strong> tab and click the <strong className="mx-1">Retrain Models</strong> button.
+                  </div>
+                </div>
+
+                {/* Real-time External Data */}
+                <div className={`rounded-lg border-l-4 border-emerald-500 p-5 ${isDarkMode ? 'bg-slate-900 border border-slate-700' : 'bg-emerald-50 border border-emerald-100'}`}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <svg className="h-6 w-6 text-emerald-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
+                    </svg>
+                    <h4 className={`text-xl font-semibold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>Real-time External Data</h4>
+                  </div>
+                  <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'} text-sm leading-relaxed mb-4`}>
+                    Accurate demand forecasting requires more than historical arrivals alone. The system automatically fetches and incorporates the following external data sources in real time to enrich each prediction:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-emerald-200'}`}>
+                      <p className={`font-semibold text-sm mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Open-Meteo</p>
+                      <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Supplies monthly average high and low temperatures (°C) and average precipitation (cm) for Panglao. Weather is a strong seasonal driver of tourist arrivals.
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-emerald-200'}`}>
+                      <p className={`font-semibold text-sm mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Calendarific</p>
+                      <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Provides the count of Philippine public holidays per month and holiday counts for the top 10 tourist-origin markets. Holiday periods significantly influence travel behavior.
+                      </p>
+                    </div>
+                    <div className={`rounded-lg p-4 border ${isDarkMode ? 'bg-slate-800 border-slate-600' : 'bg-white border-emerald-200'}`}>
+                      <p className={`font-semibold text-sm mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Inflation Rate</p>
+                      <p className={`text-xs leading-relaxed ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Monthly Philippine inflation data is incorporated as an economic indicator, reflecting the impact of consumer purchasing power on domestic and international travel demand.
+                      </p>
+                    </div>
+                  </div>
+                  <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-700'} text-sm leading-relaxed mb-4`}>
+                    These external signals are automatically resolved each time a forecast is generated or a model is retrained. The connection status of each external API can be monitored in the <strong>Model Parameters</strong> tab under the <strong>API Status</strong> section.
+                  </p>
+                  <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${isDarkMode ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'}`}>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    To view API connection status, go to the <strong className="mx-1">Model Parameters</strong> tab and scroll to the <strong className="mx-1">API Status</strong> section.
+                  </div>
+                </div>
+
+                {/* How to Use */}
+                <div>
+                  <h4 className={`text-xl font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>How to Use This System</h4>
+                  <ol className={`space-y-3 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <li className="flex gap-3">
+                      <span className={`flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white'}`}>1</span>
+                      <span><strong>Dashboard tab</strong> — Monitor next-month occupancy forecasts, tourist trend charts, and current external parameter values (weather, holidays, inflation).</span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className={`flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white'}`}>2</span>
+                      <span><strong>Metrics tab</strong> — Review historical vs. predicted tourist arrival charts and the Forecasting Model Performance table to evaluate all models across months.</span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className={`flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ${isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-600 text-white'}`}>3</span>
+                      <span><strong>Model Parameters tab</strong> — Submit monthly tourist arrival data, manually trigger model retraining, review trained model logs, and check external API connectivity.</span>
+                    </li>
+                  </ol>
+                </div>
+
               </div>
             )}
           </div>

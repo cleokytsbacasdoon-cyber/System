@@ -148,7 +148,10 @@ export const MonthlyTouristArrivalsDataChart: React.FC<MonthlyTouristArrivalsDat
   }, [forecasts, year]);
 
   const hasAnyActualData = monthlyActualTotals.some((value) => value !== null && value > 0);
-  const hasAnyPredictedData = monthlyPredictedTotals.some((value) => value !== null && value > 0);
+  // Only show predicted line for test-set years (2024+) and future years.
+  // 2016–2023 is the training period — predictions there are not meaningful to display.
+  const showPredicted = year >= 2024;
+  const hasAnyPredictedData = showPredicted && monthlyPredictedTotals.some((value) => value !== null && value > 0);
 
   const singleYearChartData = {
     labels: MONTH_LABELS,
