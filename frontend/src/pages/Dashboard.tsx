@@ -23,9 +23,7 @@ import { fetchMonthlyWeather, MonthlyWeather } from '../services/weatherService'
 import { useToast } from '../contexts/ToastContext';
 import { ModelMetrics, DriftAlert, APIEndpoint, DemandForecast, DataQuality, MonthlyTourismDatasetRecord, Top10MarketHolidayRecord, TrainedModel } from '../types';
 
-interface DashboardProps {
-  onSettingsClick: () => void;
-}
+interface DashboardProps {}
 
 interface TouristTrendParameter {
   label: string;
@@ -48,8 +46,7 @@ type DashboardIconName =
   | 'info'
   | 'notification'
   | 'sun'
-  | 'moon'
-  | 'settings';
+  | 'moon';
 
 interface DashboardIconProps {
   name: DashboardIconName;
@@ -130,19 +127,12 @@ const DashboardIcon: React.FC<DashboardIconProps> = ({ name, className = 'h-5 w-
           <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 7 7 0 0 0 20 14.5z" />
         </svg>
       );
-    case 'settings':
-      return (
-        <svg {...baseProps}>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.8 1.8 0 0 1-3.6 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.8 1.8 0 0 1 0-3.6h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a1.8 1.8 0 0 1 3.6 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a1.8 1.8 0 0 1 0 3.6h-.2a1 1 0 0 0-.9.6z" />
-        </svg>
-      );
     default:
       return null;
   }
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
+export const Dashboard: React.FC<DashboardProps> = () => {
   const { addToast } = useToast();
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const [metrics, setMetrics] = useState<ModelMetrics[]>([]);
@@ -1323,17 +1313,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <DashboardIcon name={isDarkMode ? 'sun' : 'moon'} className="h-5 w-5" />
               </button>
               <button
-                onClick={onSettingsClick}
-                title="Settings"
-                className={`p-3 rounded-lg transition border flex items-center justify-center ${
-                  isDarkMode
-                    ? 'bg-slate-800 border-slate-600 text-white hover:bg-slate-700'
-                    : 'bg-white border-gray-300 text-black hover:bg-gray-100'
-                }`}
-              >
-                <DashboardIcon name="settings" className="h-5 w-5" />
-              </button>
-              <button
                 onClick={() => setActiveTab('about')}
                 title="About the System"
                 className={`p-3 rounded-lg transition border flex items-center justify-center ${
@@ -1402,15 +1381,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSettingsClick }) => {
                 <span className="flex items-center justify-center gap-2">
                   <DashboardIcon name={isDarkMode ? 'sun' : 'moon'} className="h-4 w-4" />
                   {isDarkMode ? 'Light' : 'Dark'}
-                </span>
-              </button>
-              <button
-                onClick={onSettingsClick}
-                className="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white"
-              >
-                <span className="flex items-center justify-center gap-2">
-                  <DashboardIcon name="settings" className="h-4 w-4" />
-                  Settings
                 </span>
               </button>
               <button
