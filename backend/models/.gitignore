@@ -1,0 +1,11 @@
+# Ignore all dynamically generated retrained model files.
+# Only the two seed/base models and .gitkeep are tracked.
+*
+
+# Keep this file and structuring helpers
+!.gitignore
+!.gitkeep
+
+# Keep seed models required for a fresh clone to work
+!tourism_xgb_model.json
+!tourism_model_metadata.json
